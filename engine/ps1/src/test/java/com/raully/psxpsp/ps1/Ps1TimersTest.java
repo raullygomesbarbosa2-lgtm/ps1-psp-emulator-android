@@ -59,6 +59,9 @@ public final class Ps1TimersTest {
     @Test
     public void dotClockAndHBlankCanDriveTheirSelectedCounters() {
         Ps1Timers timers = new Ps1MemoryBus().getTimers();
+        // The GPU's default GP1 display range puts the initial raster phase in HBlank.
+        timers.setHBlank(false);
+        timers.setVBlank(false);
         timers.writeRegister(Ps1Timers.BASE + 4, 1 << 8, 0xFFFF); // Timer 0 dotclock
         timers.writeRegister(Ps1Timers.BASE + Ps1Timers.TIMER_STRIDE + 4, 1 << 8, 0xFFFF); // Timer 1 HBlank
 
@@ -75,6 +78,9 @@ public final class Ps1TimersTest {
     @Test
     public void synchronizationModesPauseAndResumeAtBlankBoundaries() {
         Ps1Timers timers = new Ps1MemoryBus().getTimers();
+        // Start from an explicit non-blank state rather than the GP1 default raster phase.
+        timers.setHBlank(false);
+        timers.setVBlank(false);
         timers.writeRegister(Ps1Timers.BASE + 4, 1, 0xFFFF); // Timer 0: pause during HBlank
         int timer1Mode = Ps1Timers.BASE + Ps1Timers.TIMER_STRIDE + 4;
         timers.writeRegister(timer1Mode, 1 | (2 << 1), 0xFFFF); // Timer 1: reset and count only in VBlank

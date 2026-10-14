@@ -46,7 +46,7 @@ A estrutura é uma proposta de organização. O módulo `engine/ps1` agora conec
 
 1. **Fundação Android:** projeto nativo, telas iniciais e navegação entre as bibliotecas PS1 e PSP.
 2. **Catálogo local:** importar jogos escolhidos pelo usuário por seletor de arquivos do Android; manter listas separadas, sem baixar ou fornecer jogos.
-3. **Base verificável do PS1:** implementados parcialmente CPU MIPS R3000A, RAM/scratchpad, alguns registradores de controle e interrupções; os novos testes estão no CI. Próximo: confirmar a execução e ampliar a ISA/dispositivos.
+3. **Base verificável do PS1:** implementados parcialmente CPU MIPS R3000A, RAM/scratchpad, alguns registradores de controle e interrupções; os testes dessa etapa passaram no GitHub Actions. Próximo: ampliar a ISA e adicionar dispositivos.
 4. **HLE e dispositivos:** inicialização HLE, DMA, temporizadores, controles e leitura de disco; registrar claramente o que ainda não é compatível.
 5. **Imagem e áudio:** GPU e SPU próprios; primeiro objetivo é executar conteúdo de teste simples e documentado, não prometer compatibilidade universal.
 6. **Teste em aparelhos:** validar desempenho, estabilidade e compatibilidade em Android antigo e recente; corrigir antes de chamar qualquer build de jogável.
@@ -64,5 +64,5 @@ A estrutura é uma proposta de organização. O módulo `engine/ps1` agora conec
 
 - A primeira meta é uma base de PS1 testável; um emulador completo exige implementar corretamente CPU, vídeo, áudio, CD-ROM e temporização, não apenas criar telas.
 - HLE pode substituir serviços comuns de BIOS, mas não é garantia de que todo jogo funcione sem a BIOS original.
-- A CPU parcial está ligada à RAM/scratchpad, registradores de controle e interrupções; testes de integração foram adicionados. A maioria do MMIO e dispositivos, interface integrada, APK jogável e teste em aparelho ainda faltam.
+- A CPU parcial está ligada à RAM/scratchpad, registradores de controle e interrupções; os testes unitários dessa etapa passaram no CI. A maioria do MMIO e dispositivos, interface integrada, APK jogável e teste em aparelho ainda faltam.
 - Antes de qualquer distribuição, validar requisitos legais aplicáveis a marcas, formatos de arquivo e distribuição do aplicativo. O app não deve fornecer firmware protegido ou jogos.

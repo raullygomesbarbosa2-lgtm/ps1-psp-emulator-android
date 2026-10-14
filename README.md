@@ -8,7 +8,7 @@ Esta pasta contém uma fundação de projeto, não um emulador funcional nem um 
 - O módulo PS1 contém um interpretador inteiro MIPS R3000A parcial, 2 MiB de RAM com espelhos de 8 MiB, aliases KSEG0/KSEG1 e scratchpad de 1 KiB (KUSEG/KSEG0, não KSEG1).
 - `Ps1Machine` conecta CPU e memória; o barramento mapeia I_STAT/I_MASK, fontes de IRQ, e registradores de controle de memória com valores comuns programados pelo BIOS. Temporização de barramento não é simulada.
 - O núcleo não está ligado à tela; MMIO de GPU, DMA, timers, SPU, CD-ROM, HLE, GTE/COP2 e instruções LWL/LWR/SWL/SWR ainda não estão implementados. O módulo PSP segue como stub.
-- Testes unitários cobrem CPU, RAM, scratchpad, registradores e interrupção externa. O CI está executando essa atualização; não há teste em aparelho nem prova de compatibilidade com jogos.
+- Testes unitários de CPU, RAM, scratchpad, registradores e interrupção externa passaram no GitHub Actions. Isso não é teste em aparelho nem prova de compatibilidade com jogos.
 
 Referências técnicas: [PSX-SPX: mapa de memória](https://problemkaputt.de/psxspx-memory-map.htm), [registradores de controle de memória](https://problemkaputt.de/psxspx-memory-control.htm) e [interrupções](https://problemkaputt.de/psxspx-interrupts.htm).
 

@@ -1,0 +1,22 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.raully.psxpsp'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.raully.psxpsp'
+        minSdk 23
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0-scaffold'
+    }
+}
+
+dependencies {
+    implementation project(':engine:common')
+    implementation project(':engine:ps1')
+    implementation project(':engine:psp')
+}

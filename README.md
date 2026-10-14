@@ -8,7 +8,7 @@ Esta pasta contém uma fundação de projeto, não um emulador funcional nem um 
 - O módulo PS1 contém um interpretador inteiro MIPS R3000A parcial ligado a uma memória inicial: 2 MiB de RAM com espelhos de 8 MiB, aliases KSEG0/KSEG1 e scratchpad de 1 KiB.
 - `Ps1Machine` compõe CPU e memória; acessos a hardware MMIO ainda geram bus fault explícito. O núcleo não está ligado à tela; GTE/COP2, HLE, GPU, SPU, CD-ROM, temporização e instruções LWL/LWR/SWL/SWR ainda não estão implementados.
 - O módulo PSP continua sendo apenas um stub.
-- Há testes unitários de CPU e memória, incluindo integração CPU/RAM. O CI está configurado para executá-los; o resultado desta atualização será registrado após a execução.
+- Os testes unitários de CPU e memória, incluindo a integração CPU/RAM, passaram no GitHub Actions; isso não é teste em aparelho nem prova de compatibilidade com jogos.
 
 ## Build
 

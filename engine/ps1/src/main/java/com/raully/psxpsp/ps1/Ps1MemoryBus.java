@@ -3,21 +3,39 @@ package com.raully.psxpsp.ps1;
 import java.util.Arrays;
 
 /**
- * Mapa inicial de memória PS1: 2 MiB RAM com espelhos de 8 MiB e scratchpad
- * de 1 KiB. MMIO, ROMs e demais regiões ainda geram bus fault explícito.
+ * Initial PS1 address bus: mirrored 2 MiB RAM, 1 KiB scratchpad, selected
+ * memory-control registers and the interrupt controller. Other MMIO, ROM and
+ * expansion regions raise an explicit bus fault until their devices exist.
  */
 public final class Ps1MemoryBus implements Ps1Bus {
     public static final int RAM_SIZE = 2 * 1024 * 1024;
     public static final int RAM_MIRROR_SIZE = 8 * 1024 * 1024;
     public static final int SCRATCHPAD_START = 0x1F800000;
     public static final int SCRATCHPAD_SIZE = 1024;
+    public static final int INTERRUPT_STATUS = 0x1F801070;
+    public static final int INTERRUPT_MASK = 0x1F801074;
 
     private final byte[] ram = new byte[RAM_SIZE];
     private final byte[] scratchpad = new byte[SCRATCHPAD_SIZE];
+    private final Ps1InterruptController interruptController = new Ps1InterruptController();
+    private final Ps1MemoryControl memoryControl = new Ps1MemoryControl();
+
+    public Ps1InterruptController getInterruptController() { return interruptController; }
+    public Ps1MemoryControl getMemoryControl() { return memoryControl; }
+
+    @Override
+    public boolean isInterruptPending() {
+        return interruptController.isPending();
+    }
 
     @Override
     public int read8(int address) {
-        Region region = map(address, false);
+        int physicalAddress = toPhysicalAddress(address, false);
+        if (isInterruptRegister(physicalAddress)) {
+            return interruptController.readByte(physicalAddress - INTERRUPT_STATUS);
+        }
+        if (memoryControl.isMappedAddress(physicalAddress)) return memoryControl.readByte(physicalAddress);
+        Region region = mapMemory(address, physicalAddress, false);
         return region.bytes[region.index] & 0xFF;
     }
 
@@ -33,7 +51,16 @@ public final class Ps1MemoryBus implements Ps1Bus {
 
     @Override
     public void write8(int address, int value) {
-        Region region = map(address, true);
+        int physicalAddress = toPhysicalAddress(address, true);
+        if (isInterruptRegister(physicalAddress)) {
+            interruptController.writeByte(physicalAddress - INTERRUPT_STATUS, value);
+            return;
+        }
+        if (memoryControl.isMappedAddress(physicalAddress)) {
+            memoryControl.writeByte(physicalAddress, value);
+            return;
+        }
+        Region region = mapMemory(address, physicalAddress, true);
         region.bytes[region.index] = (byte) value;
     }
 
@@ -49,10 +76,12 @@ public final class Ps1MemoryBus implements Ps1Bus {
         write16(address + 2, value >>> 16);
     }
 
-    /** Clear writable RAM and scratchpad, useful when resetting a machine. */
+    /** Clear writable RAM and scratchpad and reset the two implemented MMIO blocks. */
     public void clear() {
         Arrays.fill(ram, (byte) 0);
         Arrays.fill(scratchpad, (byte) 0);
+        interruptController.reset();
+        memoryControl.resetToCommonBiosValues();
     }
 
     /** Load bytes into physical main RAM; validates the complete destination range. */
@@ -69,22 +98,25 @@ public final class Ps1MemoryBus implements Ps1Bus {
         return ram.clone();
     }
 
-    private Region map(int virtualAddress, boolean write) {
-        int segment = virtualAddress >>> 29;
-        final int physicalAddress;
-        if (segment == 4 || segment == 5) { // KSEG0/KSEG1, uncached alias.
-            physicalAddress = virtualAddress & 0x1FFFFFFF;
-        } else if (segment == 0) { // KUSEG low physical window.
-            physicalAddress = virtualAddress;
-        } else {
-            throw new Ps1Bus.BusFaultException(virtualAddress, write);
-        }
+    private boolean isInterruptRegister(int physicalAddress) {
+        return physicalAddress >= INTERRUPT_STATUS && physicalAddress < INTERRUPT_MASK + 4;
+    }
 
-        if (physicalAddress >= 0 && physicalAddress < RAM_MIRROR_SIZE) {
+    private int toPhysicalAddress(int virtualAddress, boolean write) {
+        int segment = virtualAddress >>> 29;
+        if (segment == 4 || segment == 5) return virtualAddress & 0x1FFFFFFF; // KSEG0/KSEG1
+        if (segment == 0) return virtualAddress; // low KUSEG physical window
+        throw new Ps1Bus.BusFaultException(virtualAddress, write);
+    }
+
+    private Region mapMemory(int virtualAddress, int physicalAddress, boolean write) {
+        if (physicalAddress < RAM_MIRROR_SIZE) {
             return new Region(ram, physicalAddress & (RAM_SIZE - 1));
         }
         int scratchOffset = physicalAddress - SCRATCHPAD_START;
-        if (scratchOffset >= 0 && scratchOffset < SCRATCHPAD_SIZE) {
+        int segment = virtualAddress >>> 29;
+        // Scratchpad is mapped in KUSEG and KSEG0, but not in uncached KSEG1.
+        if (scratchOffset >= 0 && scratchOffset < SCRATCHPAD_SIZE && segment != 5) {
             return new Region(scratchpad, scratchOffset);
         }
         throw new Ps1Bus.BusFaultException(virtualAddress, write);

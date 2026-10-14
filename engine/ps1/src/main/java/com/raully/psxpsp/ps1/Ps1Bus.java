@@ -27,4 +27,7 @@ public interface Ps1Bus {
     void write8(int address, int value);
     void write16(int address, int value);
     void write32(int address, int value);
+
+    /** True while an enabled external PS1 interrupt source is pending. */
+    default boolean isInterruptPending() { return false; }
 }

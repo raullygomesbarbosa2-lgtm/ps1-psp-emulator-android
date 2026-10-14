@@ -11,6 +11,7 @@ public final class MipsR3000A {
     public static final int GENERAL_EXCEPTION_VECTOR = 0x80000080;
     public static final int BOOT_EXCEPTION_VECTOR = 0xBFC00180;
 
+    private static final int EXC_INTERRUPT = 0;
     private static final int EXC_ADDRESS_LOAD = 4;
     private static final int EXC_ADDRESS_STORE = 5;
     private static final int EXC_BUS_ERROR_LOAD = 6;
@@ -94,8 +95,22 @@ public final class MipsR3000A {
         return cp0[index];
     }
 
-    /** Execute one instruction, including the effects of any older delayed load. */
+    /** Execute one instruction, including pending IRQs and any older delayed load. */
     public void step() {
+        refreshHardwareInterrupt();
+        if (!branchPending && hardwareInterruptEnabled()) {
+            if (pendingLoadRegister > 0) gpr[pendingLoadRegister] = pendingLoadValue;
+            pendingLoadRegister = -1;
+            currentInstructionPc = pc;
+            currentInstructionInDelaySlot = false;
+            currentBranchPc = 0;
+            registerWrittenThisStep = -1;
+            scheduledLoadRegister = -1;
+            branchPending = false;
+            enterException(EXC_INTERRUPT, -1);
+            gpr[0] = 0;
+            return;
+        }
         final int delayedLoadRegister = pendingLoadRegister;
         final int delayedLoadValue = pendingLoadValue;
         pendingLoadRegister = -1;
@@ -331,6 +346,17 @@ public final class MipsR3000A {
             gpr[index] = value;
             registerWrittenThisStep = index;
         }
+    }
+
+    private void refreshHardwareInterrupt() {
+        if (bus.isInterruptPending()) cp0[CP0_CAUSE] |= 1 << 10;
+        else cp0[CP0_CAUSE] &= ~(1 << 10);
+    }
+
+    private boolean hardwareInterruptEnabled() {
+        int status = cp0[CP0_STATUS];
+        int cause = cp0[CP0_CAUSE];
+        return (status & 1) != 0 && (status & (1 << 10)) != 0 && (cause & (1 << 10)) != 0;
     }
 
     private void enterException(int exceptionCode, int badAddress) {

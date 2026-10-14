@@ -16,12 +16,18 @@ public final class Ps1MemoryBusTest {
     }
 
     @Test
-    public void scratchpadIsAccessibleThroughCachedAndUncachedAliases() {
+    public void scratchpadIsAccessibleThroughKusegAndKseg0ButNotKseg1() {
         Ps1MemoryBus bus = new Ps1MemoryBus();
         bus.write32(Ps1MemoryBus.SCRATCHPAD_START, 0xCAFEBABE);
 
+        assertEquals(0xCAFEBABE, bus.read32(0x1F800000));
         assertEquals(0xCAFEBABE, bus.read32(0x9F800000));
-        assertEquals(0xCAFEBABE, bus.read32(0xBF800000));
+        try {
+            bus.read32(0xBF800000);
+            fail("scratchpad is not mapped in KSEG1");
+        } catch (Ps1Bus.BusFaultException expected) {
+            assertEquals(false, expected.isWrite());
+        }
     }
 
     @Test

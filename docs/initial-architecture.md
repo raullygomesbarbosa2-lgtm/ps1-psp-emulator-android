@@ -46,7 +46,7 @@ A estrutura é uma proposta de organização. O módulo `engine/ps1` agora conec
 
 1. **Fundação Android:** projeto nativo, telas iniciais e navegação entre as bibliotecas PS1 e PSP.
 2. **Catálogo local:** importar jogos escolhidos pelo usuário por seletor de arquivos do Android; manter listas separadas, sem baixar ou fornecer jogos.
-3. **Base verificável do PS1:** implementados parcialmente CPU, RAM/scratchpad, controle, interrupções e timers; os testes de timer/IRQ desta etapa estão no CI. Próximo: confirmar a execução e integrar scheduler de ciclos/vídeo.
+3. **Base verificável do PS1:** implementados parcialmente CPU, RAM/scratchpad, controle, interrupções e timers; os testes dessa etapa passaram no GitHub Actions. Próximo: integrar scheduler de ciclos/vídeo.
 4. **HLE e dispositivos:** inicialização HLE, DMA, controles e leitura de disco; integrar eventos reais de vídeo aos timers e registrar claramente o que ainda não é compatível.
 5. **Imagem e áudio:** GPU e SPU próprios; primeiro objetivo é executar conteúdo de teste simples e documentado, não prometer compatibilidade universal.
 6. **Teste em aparelhos:** validar desempenho, estabilidade e compatibilidade em Android antigo e recente; corrigir antes de chamar qualquer build de jogável.
@@ -64,5 +64,5 @@ A estrutura é uma proposta de organização. O módulo `engine/ps1` agora conec
 
 - A primeira meta é uma base de PS1 testável; um emulador completo exige implementar corretamente CPU, vídeo, áudio, CD-ROM e temporização, não apenas criar telas.
 - HLE pode substituir serviços comuns de BIOS, mas não é garantia de que todo jogo funcione sem a BIOS original.
-- A CPU parcial está ligada à RAM/scratchpad, controle e interrupções; os três timers recebem ciclos/eventos explicitamente, mas ainda não têm clock real vindo do scheduler/GPU. A maioria do MMIO, interface integrada, APK jogável e teste em aparelho ainda faltam.
+- A CPU parcial está ligada à RAM/scratchpad, controle e interrupções; os três timers recebem ciclos/eventos explicitamente e os testes passaram no CI, mas ainda não têm clock real vindo do scheduler/GPU. A maioria do MMIO, interface integrada, APK jogável e teste em aparelho ainda faltam.
 - Antes de qualquer distribuição, validar requisitos legais aplicáveis a marcas, formatos de arquivo e distribuição do aplicativo. O app não deve fornecer firmware protegido ou jogos.

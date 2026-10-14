@@ -40,13 +40,13 @@ validation/
   psp/                      Testes do núcleo PSP quando essa etapa começar
 ```
 
-A estrutura é uma proposta de organização, não significa que esses módulos já estejam implementados nem que exista um APK jogável.
+A estrutura é uma proposta de organização. A primeira versão do interpretador inteiro MIPS R3000A e testes unitários básicos agora existem no módulo `engine/ps1`, mas ainda não estão ligados à tela, memória real ou dispositivos do PS1; não existe APK jogável.
 
 ## Sequência de desenvolvimento
 
 1. **Fundação Android:** projeto nativo, telas iniciais e navegação entre as bibliotecas PS1 e PSP.
 2. **Catálogo local:** importar jogos escolhidos pelo usuário por seletor de arquivos do Android; manter listas separadas, sem baixar ou fornecer jogos.
-3. **Base verificável do PS1:** implementar CPU, memória, interrupções e testes unitários antes de tentar executar jogos comerciais.
+3. **Base verificável do PS1:** etapa inicial feita: interpretador MIPS R3000A parcial e testes unitários escritos para operações básicas, delay slot, load delay e exceções. Próximo: executar os testes, ampliar a ISA e integrar memória/barramento.
 4. **HLE e dispositivos:** inicialização HLE, DMA, temporizadores, controles e leitura de disco; registrar claramente o que ainda não é compatível.
 5. **Imagem e áudio:** GPU e SPU próprios; primeiro objetivo é executar conteúdo de teste simples e documentado, não prometer compatibilidade universal.
 6. **Teste em aparelhos:** validar desempenho, estabilidade e compatibilidade em Android antigo e recente; corrigir antes de chamar qualquer build de jogável.
@@ -64,5 +64,5 @@ A estrutura é uma proposta de organização, não significa que esses módulos 
 
 - A primeira meta é uma base de PS1 testável; um emulador completo exige implementar corretamente CPU, vídeo, áudio, CD-ROM e temporização, não apenas criar telas.
 - HLE pode substituir serviços comuns de BIOS, mas não é garantia de que todo jogo funcione sem a BIOS original.
-- Ainda não há implementação, compilação, testes em aparelho nem APK neste documento. Essas etapas precisam ocorrer antes de afirmar que algo está pronto.
+- Há uma implementação parcial da CPU e testes unitários no código, mas eles ainda não tiveram execução confirmada; a CPU não está integrada à interface ou ao barramento do console. Não há compilação de APK nem teste em aparelho confirmado.
 - Antes de qualquer distribuição, validar requisitos legais aplicáveis a marcas, formatos de arquivo e distribuição do aplicativo. O app não deve fornecer firmware protegido ou jogos.

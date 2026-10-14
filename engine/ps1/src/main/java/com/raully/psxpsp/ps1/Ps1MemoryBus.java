@@ -4,8 +4,8 @@ import java.util.Arrays;
 
 /**
  * Initial PS1 address bus: mirrored 2 MiB RAM, 1 KiB scratchpad, selected
- * memory-control registers and the interrupt controller. Other MMIO, ROM and
- * expansion regions raise an explicit bus fault until their devices exist.
+ * memory-control registers, interrupt controller, video timing, and partial
+ * GP1 display control. Other MMIO, ROM and expansion regions fault explicitly.
  */
 public final class Ps1MemoryBus implements Ps1Bus {
     public static final int RAM_SIZE = 2 * 1024 * 1024;
@@ -14,16 +14,21 @@ public final class Ps1MemoryBus implements Ps1Bus {
     public static final int SCRATCHPAD_SIZE = 1024;
     public static final int INTERRUPT_STATUS = 0x1F801070;
     public static final int INTERRUPT_MASK = 0x1F801074;
+    public static final int GPU_CONTROL = 0x1F801814;
 
     private final byte[] ram = new byte[RAM_SIZE];
     private final byte[] scratchpad = new byte[SCRATCHPAD_SIZE];
     private final Ps1InterruptController interruptController = new Ps1InterruptController();
     private final Ps1MemoryControl memoryControl = new Ps1MemoryControl();
     private final Ps1Timers timers = new Ps1Timers(interruptController);
+    private final Ps1VideoTiming videoTiming = new Ps1VideoTiming(timers);
+    private final Ps1Gpu gpu = new Ps1Gpu(videoTiming);
 
     public Ps1InterruptController getInterruptController() { return interruptController; }
     public Ps1MemoryControl getMemoryControl() { return memoryControl; }
     public Ps1Timers getTimers() { return timers; }
+    public Ps1VideoTiming getVideoTiming() { return videoTiming; }
+    public Ps1Gpu getGpu() { return gpu; }
 
     @Override
     public boolean isInterruptPending() {
@@ -36,6 +41,9 @@ public final class Ps1MemoryBus implements Ps1Bus {
         if (timers.isMappedAddress(physicalAddress)) {
             int word = timers.readRegister(physicalAddress & ~3);
             return (word >>> ((physicalAddress & 3) * 8)) & 0xFF;
+        }
+        if (isGpuControlRegister(physicalAddress)) {
+            return (gpu.readStatus() >>> ((physicalAddress - GPU_CONTROL) * 8)) & 0xFF;
         }
         if (isInterruptRegister(physicalAddress)) {
             return interruptController.readByte(physicalAddress - INTERRUPT_STATUS);
@@ -71,6 +79,10 @@ public final class Ps1MemoryBus implements Ps1Bus {
             if ((mask & 0xFFFF) != 0) timers.writeRegister(physicalAddress & ~3, (value & 0xFF) << shift, mask);
             return;
         }
+        if (isGpuControlRegister(physicalAddress)) {
+            gpu.writeControlByte(physicalAddress - GPU_CONTROL, value);
+            return;
+        }
         if (isInterruptRegister(physicalAddress)) {
             interruptController.writeByte(physicalAddress - INTERRUPT_STATUS, value);
             return;
@@ -99,6 +111,10 @@ public final class Ps1MemoryBus implements Ps1Bus {
     @Override
     public void write32(int address, int value) {
         int physicalAddress = toPhysicalAddress(address, true);
+        if (physicalAddress == GPU_CONTROL) {
+            gpu.writeControlWord(value);
+            return;
+        }
         if (timers.isMappedAddress(physicalAddress)) {
             timers.writeRegister(physicalAddress & ~3, value, 0xFFFF);
             return;
@@ -107,13 +123,14 @@ public final class Ps1MemoryBus implements Ps1Bus {
         write16(address + 2, value >>> 16);
     }
 
-    /** Clear writable RAM/scratchpad and reset implemented timer/control/IRQ blocks. */
+    /** Clear RAM/scratchpad and reset implemented control, IRQ, timer, video and GPU blocks. */
     public void clear() {
         Arrays.fill(ram, (byte) 0);
         Arrays.fill(scratchpad, (byte) 0);
         interruptController.reset();
         memoryControl.resetToCommonBiosValues();
         timers.reset();
+        gpu.reset();
     }
 
     /** Load bytes into physical main RAM; validates the complete destination range. */
@@ -128,6 +145,10 @@ public final class Ps1MemoryBus implements Ps1Bus {
 
     public byte[] copyRam() {
         return ram.clone();
+    }
+
+    private boolean isGpuControlRegister(int physicalAddress) {
+        return physicalAddress >= GPU_CONTROL && physicalAddress < GPU_CONTROL + 4;
     }
 
     private boolean isInterruptRegister(int physicalAddress) {

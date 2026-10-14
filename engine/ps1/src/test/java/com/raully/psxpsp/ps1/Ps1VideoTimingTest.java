@@ -12,7 +12,7 @@ public final class Ps1VideoTimingTest {
         Ps1VideoTiming timing = machine.getVideoTiming();
         assertEquals(Ps1VideoTiming.Region.NTSC, timing.getRegion());
         assertEquals(263, timing.getScanlinesPerFrame());
-        assertEquals(240, timing.getVblankStartLine());
+        assertEquals(256, timing.getVblankStartLine()); // GP1 default: Y1=16, Y2=256
 
         timing.setRegion(Ps1VideoTiming.Region.PAL);
         assertEquals(314, timing.getScanlinesPerFrame());

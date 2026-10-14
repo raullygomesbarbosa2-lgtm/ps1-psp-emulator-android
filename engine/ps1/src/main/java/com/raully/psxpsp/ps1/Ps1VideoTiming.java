@@ -1,10 +1,8 @@
 package com.raully.psxpsp.ps1;
 
 /**
- * Initial PS1 raster timing source. It generates scanline, HBlank and VBlank
- * events and forwards them to the root counters. It is not a pixel renderer;
- * horizontal blank width and active-line boundary are configurable estimates
- * until the GPU display-range registers are implemented.
+ * PS1 raster clock and blank-signal source. GPU display-range registers can
+ * replace the provisional windows; this class does not render pixels.
  */
 public final class Ps1VideoTiming {
     public enum Region {
@@ -12,15 +10,15 @@ public final class Ps1VideoTiming {
         PAL(314, 288, 34061, 11L, 7L);
 
         final int scanlines;
-        final int defaultVblankStartLine;
+        final int defaultActiveLines;
         final int lineLengthTenths;
         final long videoClockNumerator;
         final long videoClockDenominator;
 
-        Region(int scanlines, int defaultVblankStartLine, int lineLengthTenths,
+        Region(int scanlines, int defaultActiveLines, int lineLengthTenths,
                long videoClockNumerator, long videoClockDenominator) {
             this.scanlines = scanlines;
-            this.defaultVblankStartLine = defaultVblankStartLine;
+            this.defaultActiveLines = defaultActiveLines;
             this.lineLengthTenths = lineLengthTenths;
             this.videoClockNumerator = videoClockNumerator;
             this.videoClockDenominator = videoClockDenominator;
@@ -34,15 +32,14 @@ public final class Ps1VideoTiming {
     private int phaseTenths;
     private long frameCount;
     private long videoClockRemainder;
-    private int vblankStartLine;
+    private int displayStartLine;
+    private int displayLineCount;
     private int hblankStartTenths;
     private int hblankDurationTenths;
     private boolean hBlank;
     private boolean vBlank;
 
-    public Ps1VideoTiming(Ps1Timers timers) {
-        this(timers, Region.NTSC);
-    }
+    public Ps1VideoTiming(Ps1Timers timers) { this(timers, Region.NTSC); }
 
     public Ps1VideoTiming(Ps1Timers timers, Region initialRegion) {
         if (timers == null) throw new IllegalArgumentException("timers required");
@@ -56,9 +53,11 @@ public final class Ps1VideoTiming {
     public long getFrameCount() { return frameCount; }
     public boolean isHBlank() { return hBlank; }
     public boolean isVBlank() { return vBlank; }
-    public int getVblankStartLine() { return vblankStartLine; }
+    public int getVblankStartLine() { return (displayStartLine + displayLineCount) % region.scanlines; }
+    public int getDisplayStartLine() { return displayStartLine; }
+    public int getDisplayLineCount() { return displayLineCount; }
 
-    /** Change the video standard and restart raster phase without resetting counters. */
+    /** Change standard and restart raster phase; callers may then restore GPU range registers. */
     public void setRegion(Region newRegion) {
         if (newRegion == null) throw new IllegalArgumentException("region required");
         region = newRegion;
@@ -66,48 +65,80 @@ public final class Ps1VideoTiming {
         phaseTenths = 0;
         frameCount = 0;
         videoClockRemainder = 0;
-        vblankStartLine = region.defaultVblankStartLine;
+        displayStartLine = 0;
+        displayLineCount = region.defaultActiveLines;
         hblankStartTenths = (region.lineLengthTenths * 7) / 8;
         hblankDurationTenths = region.lineLengthTenths - hblankStartTenths;
         hBlank = false;
         vBlank = false;
         timers.setHBlank(false);
         timers.setVBlank(false);
-    }
-
-    /**
-     * Set the first VBlank scanline. The defaults (240 NTSC, 288 PAL) are a
-     * provisional display profile and can be replaced by GPU display settings.
-     */
-    public void setVblankStartLine(int startLine) {
-        if (startLine <= 0 || startLine >= region.scanlines) {
-            throw new IllegalArgumentException("VBlank start must be inside the frame");
-        }
-        vblankStartLine = startLine;
         updateVblankState();
     }
 
-    /** Configure the HBlank window in whole video-clock cycles within one line. */
+    /** Change video standard while retaining relative raster position. */
+    public void changeRegionPreservingPhase(Region newRegion) {
+        if (newRegion == null) throw new IllegalArgumentException("region required");
+        if (newRegion == region) return;
+        Region oldRegion = region;
+        line = (int) ((long) line * newRegion.scanlines / oldRegion.scanlines);
+        phaseTenths = (int) ((long) phaseTenths * newRegion.lineLengthTenths / oldRegion.lineLengthTenths);
+        videoClockRemainder = 0;
+        region = newRegion;
+        displayStartLine = Math.floorMod(displayStartLine, region.scanlines);
+        displayLineCount = Math.min(displayLineCount, region.scanlines);
+        hblankStartTenths = (region.lineLengthTenths * 7) / 8;
+        hblankDurationTenths = region.lineLengthTenths - hblankStartTenths;
+        updateVblankState();
+        updateHblankState();
+    }
+
+    /** Configure active lines [0, firstVBlankLine) for tests or a simple profile. */
+    public void setVblankStartLine(int firstVBlankLine) {
+        if (firstVBlankLine <= 0 || firstVBlankLine >= region.scanlines) {
+            throw new IllegalArgumentException("VBlank start must be inside the frame");
+        }
+        setVerticalDisplayRange(0, firstVBlankLine);
+    }
+
+    /** Set GP1(07h)'s display-line range, relative to the start of the frame. */
+    public void setVerticalDisplayRange(int startLine, int endLine) {
+        displayStartLine = Math.floorMod(startLine, region.scanlines);
+        int normalizedEnd = Math.floorMod(endLine, region.scanlines);
+        displayLineCount = Math.floorMod(normalizedEnd - displayStartLine, region.scanlines);
+        updateVblankState();
+    }
+
+    /** Configure an HBlank window; it may wrap across the end of a scanline. */
     public void setHorizontalBlankWindow(int startCycle, int durationCycles) {
         int lineCycles = region.lineLengthTenths / TENTHS_PER_VIDEO_CYCLE;
-        if (startCycle < 0 || durationCycles <= 0
-                || startCycle + durationCycles > lineCycles) {
-            throw new IllegalArgumentException("HBlank window must fit inside the scanline");
+        if (startCycle < 0 || startCycle >= lineCycles || durationCycles < 0
+                || durationCycles > lineCycles) {
+            throw new IllegalArgumentException("HBlank window is outside the scanline");
         }
         hblankStartTenths = startCycle * TENTHS_PER_VIDEO_CYCLE;
         hblankDurationTenths = durationCycles * TENTHS_PER_VIDEO_CYCLE;
         updateHblankState();
     }
 
-    /** Advance by GPU/video clock cycles; blank edges are delivered to the timers. */
+    /** Convert GP1(06h)'s horizontal range into its complementary HBlank window. */
+    public void setHorizontalDisplayRange(int startCycle, int endCycle) {
+        int lineCycles = region.lineLengthTenths / TENTHS_PER_VIDEO_CYCLE;
+        int start = Math.floorMod(startCycle, lineCycles);
+        int end = Math.floorMod(endCycle, lineCycles);
+        int activeWidth = Math.floorMod(end - start, lineCycles);
+        setHorizontalBlankWindow(end, lineCycles - activeWidth);
+    }
+
+    /** Advance by GPU/video clock cycles; blank edges are delivered to the root counters. */
     public void advanceVideoTicks(long ticks) {
         if (ticks < 0) throw new IllegalArgumentException("ticks must be non-negative");
         for (long i = 0; i < ticks; i++) advanceOneVideoTick();
     }
 
     /**
-     * Advance system-clock cycles and their corresponding video clock. This also
-     * clocks the root counters one system cycle at a time, preserving blank gates.
+     * Advance system-clock cycles and corresponding video clock. Timers are
+     * ticked cycle-by-cycle so HBlank/VBlank gates are observed at boundaries.
      */
     public void advanceSystemCycles(long cycles) {
         if (cycles < 0) throw new IllegalArgumentException("cycles must be non-negative");
@@ -135,8 +166,12 @@ public final class Ps1VideoTiming {
     }
 
     private void updateHblankState() {
-        boolean newState = phaseTenths >= hblankStartTenths
-                && phaseTenths < hblankStartTenths + hblankDurationTenths;
+        boolean newState = false;
+        if (hblankDurationTenths > 0) {
+            int distance = phaseTenths - hblankStartTenths;
+            if (distance < 0) distance += region.lineLengthTenths;
+            newState = distance < hblankDurationTenths;
+        }
         if (newState != hBlank) {
             hBlank = newState;
             timers.setHBlank(hBlank);
@@ -144,7 +179,9 @@ public final class Ps1VideoTiming {
     }
 
     private void updateVblankState() {
-        boolean newState = line >= vblankStartLine;
+        int distance = line - displayStartLine;
+        if (distance < 0) distance += region.scanlines;
+        boolean newState = distance >= displayLineCount;
         if (newState != vBlank) {
             vBlank = newState;
             timers.setVBlank(vBlank);

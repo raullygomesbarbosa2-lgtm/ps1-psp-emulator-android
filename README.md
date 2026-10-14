@@ -8,7 +8,7 @@ Esta pasta contém uma fundação de projeto, não um emulador funcional nem um 
 - O módulo PS1 agora contém uma primeira implementação de interpretador inteiro MIPS R3000A e testes unitários para operações básicas, desvio com delay slot, load delay e exceções.
 - O interpretador ainda não está ligado à tela nem ao barramento/memória real do PS1; GTE/COP2, HLE, GPU, SPU, CD-ROM, temporização e instruções LWL/LWR/SWL/SWR ainda não estão implementados.
 - O módulo PSP continua sendo apenas um stub.
-- Os testes foram adicionados, mas ainda não há resultado de execução confirmado nem teste em aparelho.
+- A etapa de testes unitários do PS1 passou no GitHub Actions; isso não é teste em aparelho nem prova de compatibilidade com jogos.
 
 ## Build
 

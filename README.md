@@ -6,11 +6,12 @@ Esta pasta contém uma fundação de projeto, não um emulador funcional nem um 
 - Bibliotecas PS1 e PSP separadas, cada uma com seu módulo de núcleo.
 - A tela permite selecionar um arquivo local para cada plataforma; a seleção não inicia nem valida o jogo.
 - O módulo PS1 contém um interpretador inteiro MIPS R3000A parcial, 2 MiB de RAM com espelhos de 8 MiB, aliases KSEG0/KSEG1 e scratchpad de 1 KiB (KUSEG/KSEG0, não KSEG1).
-- `Ps1Machine` conecta CPU e memória; o barramento mapeia I_STAT/I_MASK, fontes de IRQ, e registradores de controle de memória com valores comuns programados pelo BIOS. Temporização de barramento não é simulada.
-- O núcleo não está ligado à tela; MMIO de GPU, DMA, timers, SPU, CD-ROM, HLE, GTE/COP2 e instruções LWL/LWR/SWL/SWR ainda não estão implementados. O módulo PSP segue como stub.
-- Testes unitários de CPU, RAM, scratchpad, registradores e interrupção externa passaram no GitHub Actions. Isso não é teste em aparelho nem prova de compatibilidade com jogos.
+- `Ps1Machine` conecta CPU e memória; o barramento mapeia I_STAT/I_MASK, fontes de IRQ e registradores de controle de memória com valores comuns programados pelo BIOS.
+- Os três timers têm registradores de contador/modo/alvo, clock de sistema e /8, entradas para dot clock/HBlank/VBlank, modos básicos de sincronização e IRQs conectadas ao controlador.
+- O scheduler ainda precisa fornecer ciclos reais e eventos de vídeo; a CPU não avança os timers automaticamente por instrução. MMIO de GPU, DMA, SPU, CD-ROM, HLE, GTE/COP2 e instruções LWL/LWR/SWL/SWR seguem pendentes; PSP continua stub.
+- Testes unitários cobrem CPU, memória, registradores, timers e IRQs. A atualização está sendo verificada no CI; isso não é teste em aparelho nem prova de compatibilidade com jogos.
 
-Referências técnicas: [PSX-SPX: mapa de memória](https://problemkaputt.de/psxspx-memory-map.htm), [registradores de controle de memória](https://problemkaputt.de/psxspx-memory-control.htm) e [interrupções](https://problemkaputt.de/psxspx-interrupts.htm).
+Referências técnicas: [PSX-SPX: mapa de memória](https://problemkaputt.de/psxspx-memory-map.htm), [registradores de controle de memória](https://problemkaputt.de/psxspx-memory-control.htm), [interrupções](https://problemkaputt.de/psxspx-interrupts.htm) e [timers](https://www.problemkaputt.de/psxspx-timers.htm).
 
 ## Build
 

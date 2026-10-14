@@ -24,4 +24,10 @@ public final class Ps1Machine {
     public void step() {
         cpu.step();
     }
+
+    /** Advance timer sources; the caller supplies clocks from the future scheduler/GPU. */
+    public void tickSystemCycles(long cycles) { bus.getTimers().tickSystemCycles(cycles); }
+    public void tickDotClocks(long pulses) { bus.getTimers().tickDotClocks(pulses); }
+    public void setHBlank(boolean active) { bus.getTimers().setHBlank(active); }
+    public void setVBlank(boolean active) { bus.getTimers().setVBlank(active); }
 }

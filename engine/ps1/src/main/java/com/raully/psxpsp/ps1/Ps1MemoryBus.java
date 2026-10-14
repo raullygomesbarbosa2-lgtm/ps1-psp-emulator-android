@@ -19,9 +19,11 @@ public final class Ps1MemoryBus implements Ps1Bus {
     private final byte[] scratchpad = new byte[SCRATCHPAD_SIZE];
     private final Ps1InterruptController interruptController = new Ps1InterruptController();
     private final Ps1MemoryControl memoryControl = new Ps1MemoryControl();
+    private final Ps1Timers timers = new Ps1Timers(interruptController);
 
     public Ps1InterruptController getInterruptController() { return interruptController; }
     public Ps1MemoryControl getMemoryControl() { return memoryControl; }
+    public Ps1Timers getTimers() { return timers; }
 
     @Override
     public boolean isInterruptPending() {
@@ -31,6 +33,10 @@ public final class Ps1MemoryBus implements Ps1Bus {
     @Override
     public int read8(int address) {
         int physicalAddress = toPhysicalAddress(address, false);
+        if (timers.isMappedAddress(physicalAddress)) {
+            int word = timers.readRegister(physicalAddress & ~3);
+            return (word >>> ((physicalAddress & 3) * 8)) & 0xFF;
+        }
         if (isInterruptRegister(physicalAddress)) {
             return interruptController.readByte(physicalAddress - INTERRUPT_STATUS);
         }
@@ -41,17 +47,30 @@ public final class Ps1MemoryBus implements Ps1Bus {
 
     @Override
     public int read16(int address) {
+        int physicalAddress = toPhysicalAddress(address, false);
+        if (timers.isMappedAddress(physicalAddress)) {
+            int word = timers.readRegister(physicalAddress & ~3);
+            return (word >>> ((physicalAddress & 2) * 8)) & 0xFFFF;
+        }
         return read8(address) | (read8(address + 1) << 8);
     }
 
     @Override
     public int read32(int address) {
+        int physicalAddress = toPhysicalAddress(address, false);
+        if (timers.isMappedAddress(physicalAddress)) return timers.readRegister(physicalAddress & ~3) & 0xFFFF;
         return read16(address) | (read16(address + 2) << 16);
     }
 
     @Override
     public void write8(int address, int value) {
         int physicalAddress = toPhysicalAddress(address, true);
+        if (timers.isMappedAddress(physicalAddress)) {
+            int shift = (physicalAddress & 3) * 8;
+            int mask = 0xFF << shift;
+            if ((mask & 0xFFFF) != 0) timers.writeRegister(physicalAddress & ~3, (value & 0xFF) << shift, mask);
+            return;
+        }
         if (isInterruptRegister(physicalAddress)) {
             interruptController.writeByte(physicalAddress - INTERRUPT_STATUS, value);
             return;
@@ -66,22 +85,35 @@ public final class Ps1MemoryBus implements Ps1Bus {
 
     @Override
     public void write16(int address, int value) {
+        int physicalAddress = toPhysicalAddress(address, true);
+        if (timers.isMappedAddress(physicalAddress)) {
+            int shift = (physicalAddress & 2) * 8;
+            int mask = 0xFFFF << shift;
+            if ((mask & 0xFFFF) != 0) timers.writeRegister(physicalAddress & ~3, (value & 0xFFFF) << shift, mask);
+            return;
+        }
         write8(address, value);
         write8(address + 1, value >>> 8);
     }
 
     @Override
     public void write32(int address, int value) {
+        int physicalAddress = toPhysicalAddress(address, true);
+        if (timers.isMappedAddress(physicalAddress)) {
+            timers.writeRegister(physicalAddress & ~3, value, 0xFFFF);
+            return;
+        }
         write16(address, value);
         write16(address + 2, value >>> 16);
     }
 
-    /** Clear writable RAM and scratchpad and reset the two implemented MMIO blocks. */
+    /** Clear writable RAM/scratchpad and reset implemented timer/control/IRQ blocks. */
     public void clear() {
         Arrays.fill(ram, (byte) 0);
         Arrays.fill(scratchpad, (byte) 0);
         interruptController.reset();
         memoryControl.resetToCommonBiosValues();
+        timers.reset();
     }
 
     /** Load bytes into physical main RAM; validates the complete destination range. */

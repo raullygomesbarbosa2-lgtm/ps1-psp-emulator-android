@@ -13,6 +13,8 @@ public final class MipsR3000A {
 
     private static final int EXC_ADDRESS_LOAD = 4;
     private static final int EXC_ADDRESS_STORE = 5;
+    private static final int EXC_BUS_ERROR_LOAD = 6;
+    private static final int EXC_BUS_ERROR_STORE = 7;
     private static final int EXC_SYSCALL = 8;
     private static final int EXC_BREAK = 9;
     private static final int EXC_RESERVED_INSTRUCTION = 10;
@@ -121,6 +123,9 @@ public final class MipsR3000A {
                 branchPending = false;
                 throw new CpuFault(EXC_RESERVED_INSTRUCTION, -1);
             }
+        } catch (Ps1Bus.BusFaultException fault) {
+            enterException(fault.isWrite() ? EXC_BUS_ERROR_STORE : EXC_BUS_ERROR_LOAD, -1);
+            exceptionTaken = true;
         } catch (CpuFault fault) {
             enterException(fault.code, fault.badAddress);
             exceptionTaken = true;

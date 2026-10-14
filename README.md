@@ -5,10 +5,10 @@ Esta pasta contém uma fundação de projeto, não um emulador funcional nem um 
 - App Android nativo em Java, sem WebView.
 - Bibliotecas PS1 e PSP separadas, cada uma com seu módulo de núcleo.
 - A tela permite selecionar um arquivo local para cada plataforma; a seleção não inicia nem valida o jogo.
-- O módulo PS1 agora contém uma primeira implementação de interpretador inteiro MIPS R3000A e testes unitários para operações básicas, desvio com delay slot, load delay e exceções.
-- O interpretador ainda não está ligado à tela nem ao barramento/memória real do PS1; GTE/COP2, HLE, GPU, SPU, CD-ROM, temporização e instruções LWL/LWR/SWL/SWR ainda não estão implementados.
+- O módulo PS1 contém um interpretador inteiro MIPS R3000A parcial ligado a uma memória inicial: 2 MiB de RAM com espelhos de 8 MiB, aliases KSEG0/KSEG1 e scratchpad de 1 KiB.
+- `Ps1Machine` compõe CPU e memória; acessos a hardware MMIO ainda geram bus fault explícito. O núcleo não está ligado à tela; GTE/COP2, HLE, GPU, SPU, CD-ROM, temporização e instruções LWL/LWR/SWL/SWR ainda não estão implementados.
 - O módulo PSP continua sendo apenas um stub.
-- A etapa de testes unitários do PS1 passou no GitHub Actions; isso não é teste em aparelho nem prova de compatibilidade com jogos.
+- Há testes unitários de CPU e memória, incluindo integração CPU/RAM. O CI está configurado para executá-los; o resultado desta atualização será registrado após a execução.
 
 ## Build
 

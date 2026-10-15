@@ -55,7 +55,7 @@ public class Ps1CdromControllerTest {
         acknowledgeCurrentResponse(bus, 3);
 
         machine.tickSystemCycles(Ps1CdromController.SINGLE_SPEED_SECTOR_CYCLES);
-        assertEquals(1, bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 0x1F);
+        assertEquals(1, bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 1);
         assertTrue(bus.isInterruptPending());
         acknowledgeCurrentResponse(bus, 1);
         assertEquals(0, bus.read8(Ps1MemoryBus.CDROM_BASE) & 0x40); // Data is gated until BFRD.
@@ -86,11 +86,37 @@ public class Ps1CdromControllerTest {
         assertTrue(source.closed);
     }
 
+    @Test
+    public void setmodeDoubleSpeedDeliversSectorAtHalfSingleSpeedPeriod() throws Exception {
+        MemorySource source = new MemorySource(new byte[2048]);
+        Ps1DiscImage disc = Ps1DiscImage.open(Ps1CueSheet.forIso("double-speed.iso"), name -> source);
+        Ps1Machine machine = new Ps1Machine();
+        Ps1MemoryBus bus = machine.getBus();
+        bus.getCdrom().insertDisc(disc);
+
+        bus.write8(Ps1MemoryBus.CDROM_BASE, 0);
+        bus.write8(Ps1MemoryBus.CDROM_BASE + 2, 0x80); // Setmode: double speed.
+        bus.write8(Ps1MemoryBus.CDROM_BASE + 1, 0x0E);
+        acknowledgeCurrentResponse(bus, 3);
+        bus.write8(Ps1MemoryBus.CDROM_BASE, 0);
+        bus.write8(Ps1MemoryBus.CDROM_BASE + 1, 0x06); // ReadN from the initial LBA.
+        acknowledgeCurrentResponse(bus, 3);
+
+        machine.tickSystemCycles(Ps1CdromController.DOUBLE_SPEED_SECTOR_CYCLES - 1);
+        bus.write8(Ps1MemoryBus.CDROM_BASE, 1);
+        assertEquals(0, bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 1);
+        machine.tickSystemCycles(1);
+        assertEquals(1, bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 1);
+        acknowledgeCurrentResponse(bus, 1);
+        bus.getCdrom().ejectDisc();
+    }
+
     private static void acknowledgeCurrentResponse(Ps1MemoryBus bus, int expectedCode) {
         bus.write8(Ps1MemoryBus.CDROM_BASE, 1);
-        assertEquals(1 << (expectedCode - 1), bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 0x1F);
+        int expectedFlag = 1 << (expectedCode - 1);
+        assertTrue((bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & expectedFlag) != 0);
         bus.read8(Ps1MemoryBus.CDROM_BASE + 1);
-        bus.write8(Ps1MemoryBus.CDROM_BASE + 3, 1 << (expectedCode - 1));
+        bus.write8(Ps1MemoryBus.CDROM_BASE + 3, 0x1F); // Clear pending W1C flags before the next command.
     }
 
     private static final class MemorySource implements Ps1DiscImage.DataSource {

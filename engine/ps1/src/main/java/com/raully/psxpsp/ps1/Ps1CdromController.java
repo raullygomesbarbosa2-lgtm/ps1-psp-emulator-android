@@ -8,6 +8,9 @@ import java.util.Arrays;
 public final class Ps1CdromController {
     public static final int BASE_ADDRESS = 0x1F801800;
     public static final long SINGLE_SPEED_SECTOR_CYCLES = 451_584L;
+    public static final long DOUBLE_SPEED_SECTOR_CYCLES = SINGLE_SPEED_SECTOR_CYCLES / 2;
+
+    private static final int READ_MODE_DOUBLE_SPEED = 1 << 7;
 
     private static final int STATUS_READING = 1 << 5;
     private static final int IRQ_INT1 = 1;
@@ -106,9 +109,11 @@ public final class Ps1CdromController {
         if (!reading || cycles <= 0) return;
         if (sectorCycleAccumulator > Long.MAX_VALUE - cycles) sectorCycleAccumulator = Long.MAX_VALUE;
         else sectorCycleAccumulator += cycles;
+        long sectorPeriod = (readMode & READ_MODE_DOUBLE_SPEED) != 0
+                ? DOUBLE_SPEED_SECTOR_CYCLES : SINGLE_SPEED_SECTOR_CYCLES;
         if (pendingSector != null || !dataFifo.isEmpty() || interruptFlags != 0
-                || sectorCycleAccumulator < SINGLE_SPEED_SECTOR_CYCLES) return;
-        sectorCycleAccumulator -= SINGLE_SPEED_SECTOR_CYCLES;
+                || sectorCycleAccumulator < sectorPeriod) return;
+        sectorCycleAccumulator -= sectorPeriod;
         byte[] payload = new byte[2324];
         try {
             int length = discImage.readUserDataSectorAtLba(nextReadLba, payload, 0);

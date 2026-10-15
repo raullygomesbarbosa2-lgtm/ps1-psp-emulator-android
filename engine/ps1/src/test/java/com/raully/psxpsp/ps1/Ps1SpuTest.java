@@ -40,13 +40,15 @@ public final class Ps1SpuTest {
         Ps1MemoryBus bus = new Ps1MemoryBus();
         int base = Ps1Spu.BASE_ADDRESS;
         bus.write16(base + 0x1A6, 0);
-        bus.write16(base + 0x1A8, 0x000C); // shift 12, filter 0
+        bus.write16(base + 0x1A8, 0x0000); // shift 0, filter 0: loud test sample
         for (int i = 0; i < 7; i++) bus.write16(base + 0x1A8, 0x7777);
 
         bus.write16(base + 0x000, 0x3FFF); // voice 0 left volume
         bus.write16(base + 0x002, 0x3FFF); // voice 0 right volume
         bus.write16(base + 0x004, 0x1000); // nominal pitch
         bus.write16(base + 0x006, 0); // start at SPU RAM address zero
+        bus.write16(base + 0x008, 0x2C0F); // linear attack, shift 11, maximum sustain
+        bus.write16(base + 0x00A, 0x000B); // linear release, shift 11
         bus.write16(base + 0x180, 0x3FFF); // main left volume
         bus.write16(base + 0x182, 0x3FFF); // main right volume
         bus.write16(base + 0x1AA, 0x8000); // enable SPU
@@ -56,10 +58,16 @@ public final class Ps1SpuTest {
         assertTrue(bus.getSpu().isVoiceActive(0));
         short[] pcm = bus.getSpu().renderPcm(4);
         assertEquals(8, pcm.length);
-        assertTrue(pcm[0] > 0);
-        assertTrue(pcm[1] > 0);
+        assertEquals(0, pcm[0]); // attack starts at zero volume
+        assertTrue(pcm[2] > 0);
+        assertTrue(pcm[3] > 0);
+        assertEquals(28, bus.read16(base + 0x00C)); // four fast attack steps of +7
 
-        bus.write16(base + 0x18C, 1); // key off voice 0
+        bus.write16(base + 0x18C, 1); // key off begins the release phase
+        assertTrue(bus.getSpu().isVoiceActive(0));
+        bus.getSpu().renderPcm(2);
+        assertEquals(12, bus.read16(base + 0x00C));
+        bus.getSpu().renderPcm(2);
         assertFalse(bus.getSpu().isVoiceActive(0));
         short[] silent = bus.getSpu().renderPcm(1);
         assertEquals(0, silent[0]);
@@ -71,7 +79,7 @@ public final class Ps1SpuTest {
         Ps1MemoryBus bus = new Ps1MemoryBus();
         int base = Ps1Spu.BASE_ADDRESS;
         bus.write16(base + 0x1A6, 0);
-        bus.write16(base + 0x1A8, 0x010C); // shift 12, filter 0, end-of-sample flag
+        bus.write16(base + 0x1A8, 0x0100); // shift 0, filter 0, end-of-sample flag
         for (int i = 0; i < 7; i++) bus.write16(base + 0x1A8, 0x7777);
 
         bus.write16(base + 0x000, 0x3FFF);
@@ -88,8 +96,8 @@ public final class Ps1SpuTest {
 
         bus.write16(base + 0x188, 1);
         assertTrue(bus.getSpu().isVoiceActive(0));
-        short[] pcm = bus.getSpu().renderPcm(1);
-        assertTrue(pcm[0] > 0);
+        short[] pcm = bus.getSpu().renderPcm(2);
+        assertTrue(pcm[2] > 0);
     }
 
     @Test

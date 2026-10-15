@@ -5,8 +5,8 @@ import java.util.Arrays;
 /**
  * Initial software model of the PS1 SPU. It maps the voice/global registers,
  * 512 KiB sample RAM, ADPCM block decoding, key-on/off and a deterministic PCM
- * renderer. ADSR, interpolation, reverb, noise, CD audio and exact SPU timing
- * are not modeled yet.
+ * renderer. ADSR envelope stepping is modeled at 44.1 kHz; interpolation,
+ * reverb, noise, CD audio and exact SPU timing are not modeled yet.
  */
 public final class Ps1Spu {
     public static final int BASE_ADDRESS = 0x1F801C00;
@@ -29,6 +29,11 @@ public final class Ps1Spu {
     private static final int SPU_CONTROL = 0x1AA;
     private static final int SPU_TRANSFER_CONTROL = 0x1AC;
     private static final int SPU_STATUS = 0x1AE;
+
+    private static final int ENVELOPE_ATTACK = 0;
+    private static final int ENVELOPE_DECAY = 1;
+    private static final int ENVELOPE_SUSTAIN = 2;
+    private static final int ENVELOPE_RELEASE = 3;
 
     private static final int[] FILTER_1 = {0, 60, 115, 98, 122};
     private static final int[] FILTER_2 = {0, 0, -52, -55, -60};
@@ -125,7 +130,10 @@ public final class Ps1Spu {
                 case 0x06: voice.startAddress = merged; break;
                 case 0x08: voice.adsrLow = merged; break;
                 case 0x0A: voice.adsrHigh = merged; break;
-                case 0x0C: /* envelope/current volume is read-only in this model */ break;
+                case 0x0C:
+                    voice.envelopeLevel = merged & 0x7FFF;
+                    voice.currentVolume = voice.envelopeLevel;
+                    break;
                 case 0x0E: voice.repeatAddress = merged; break;
                 default: break;
             }
@@ -222,7 +230,7 @@ public final class Ps1Spu {
             for (Voice voice : voices) {
                 if (!voice.active) continue;
                 if (voice.sampleIndex >= SAMPLES_PER_BLOCK && !loadNextBlock(voice)) continue;
-                int sample = voice.samples[voice.sampleIndex];
+                int sample = (int) (((long) voice.samples[voice.sampleIndex] * voice.envelopeLevel) >> 15);
                 left += ((long) sample * signedVolume(voice.volumeLeft)) >> 14;
                 right += ((long) sample * signedVolume(voice.volumeRight)) >> 14;
                 advanceVoice(voice);
@@ -252,14 +260,17 @@ public final class Ps1Spu {
                 voice.repeatAddress = voice.startAddress;
                 voice.phase = 0;
                 voice.sampleIndex = SAMPLES_PER_BLOCK;
+                voice.envelopeLevel = 0;
+                voice.currentVolume = 0;
+                voice.envelopePhase = ENVELOPE_ATTACK;
+                voice.envelopeCyclesRemaining = 0;
                 voice.history1 = 0;
                 voice.history2 = 0;
                 voice.blockLoaded = false;
-                voice.currentVolume = 0x3FFF;
                 loadNextBlock(voice);
-            } else {
-                voice.active = false;
-                voice.sampleIndex = SAMPLES_PER_BLOCK;
+            } else if (voice.active) {
+                voice.envelopePhase = ENVELOPE_RELEASE;
+                voice.envelopeCyclesRemaining = 0;
             }
         }
     }
@@ -271,6 +282,75 @@ public final class Ps1Spu {
         while (samplesToAdvance-- > 0 && voice.active) {
             voice.sampleIndex++;
             if (voice.sampleIndex >= SAMPLES_PER_BLOCK) loadNextBlock(voice);
+        }
+        if (voice.active) advanceEnvelope(voice);
+    }
+
+    private void advanceEnvelope(Voice voice) {
+        int shift;
+        int magnitude;
+        int direction;
+        boolean exponential;
+        switch (voice.envelopePhase) {
+            case ENVELOPE_ATTACK:
+                shift = (voice.adsrLow >>> 10) & 0x1F;
+                magnitude = 7 - ((voice.adsrLow >>> 8) & 3);
+                direction = 1;
+                exponential = (voice.adsrLow & 0x8000) != 0;
+                break;
+            case ENVELOPE_DECAY:
+                shift = (voice.adsrLow >>> 4) & 0x0F;
+                magnitude = 8;
+                direction = -1;
+                exponential = true;
+                break;
+            case ENVELOPE_SUSTAIN:
+                shift = (voice.adsrHigh >>> 8) & 0x1F;
+                direction = (voice.adsrHigh & 0x4000) != 0 ? -1 : 1;
+                int sustainStep = (voice.adsrHigh >>> 6) & 3;
+                magnitude = direction > 0 ? 7 - sustainStep : 8 - sustainStep;
+                exponential = (voice.adsrHigh & 0x8000) != 0;
+                break;
+            case ENVELOPE_RELEASE:
+                shift = voice.adsrHigh & 0x1F;
+                magnitude = 8;
+                direction = -1;
+                exponential = (voice.adsrHigh & 0x20) != 0;
+                break;
+            default:
+                return;
+        }
+
+        if (voice.envelopeCyclesRemaining > 0) {
+            voice.envelopeCyclesRemaining--;
+            return;
+        }
+        int period = 1 << Math.max(0, shift - 11);
+        if (voice.envelopePhase == ENVELOPE_ATTACK && exponential && voice.envelopeLevel > 0x6000) {
+            period = Math.min(1 << 22, period << 2);
+        }
+        int step = magnitude << Math.max(0, 11 - shift);
+        if (exponential && direction < 0 && voice.envelopeLevel > 0) {
+            step = Math.max(1, (magnitude * voice.envelopeLevel) >> 15);
+        }
+        voice.envelopeLevel = Math.max(0, Math.min(0x7FFF, voice.envelopeLevel + direction * step));
+        voice.currentVolume = voice.envelopeLevel;
+        voice.envelopeCyclesRemaining = period - 1;
+
+        if (voice.envelopePhase == ENVELOPE_ATTACK && voice.envelopeLevel >= 0x7FFF) {
+            voice.envelopePhase = ENVELOPE_DECAY;
+            voice.envelopeCyclesRemaining = 0;
+        } else if (voice.envelopePhase == ENVELOPE_DECAY) {
+            int sustainLevel = Math.min(0x7FFF, ((voice.adsrLow & 0x0F) + 1) << 11);
+            if (voice.envelopeLevel <= sustainLevel) {
+                voice.envelopeLevel = sustainLevel;
+                voice.currentVolume = sustainLevel;
+                voice.envelopePhase = ENVELOPE_SUSTAIN;
+                voice.envelopeCyclesRemaining = 0;
+            }
+        } else if (voice.envelopePhase == ENVELOPE_RELEASE && voice.envelopeLevel == 0) {
+            voice.active = false;
+            voice.sampleIndex = SAMPLES_PER_BLOCK;
         }
     }
 
@@ -361,6 +441,9 @@ public final class Ps1Spu {
         int repeatAddress;
         int currentAddress;
         int phase;
+        int envelopePhase;
+        int envelopeLevel;
+        int envelopeCyclesRemaining;
         int sampleIndex = SAMPLES_PER_BLOCK;
         int history1;
         int history2;
@@ -373,7 +456,8 @@ public final class Ps1Spu {
             volumeLeft = volumeRight = 0;
             pitch = 0x1000;
             startAddress = adsrLow = adsrHigh = currentVolume = repeatAddress = 0;
-            currentAddress = phase = history1 = history2 = blockFlags = 0;
+            currentAddress = phase = envelopePhase = envelopeLevel = envelopeCyclesRemaining = 0;
+            history1 = history2 = blockFlags = 0;
             sampleIndex = SAMPLES_PER_BLOCK;
             blockLoaded = false;
             active = false;

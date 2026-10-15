@@ -20,7 +20,7 @@ public final class Ps1Session implements AutoCloseable {
         void onAudio(short[] interleavedPcm, int sampleRate);
     }
 
-    private static final long NTSC_FRAME_NANOS = 16_666_667L;
+    private static final long NTSC_FRAME_NANOS = 1_000_000_000L * 1001L / 60000L;
     private static final long PAL_FRAME_NANOS = 20_000_000L;
 
     private final Object pauseLock = new Object();
@@ -150,6 +150,7 @@ public final class Ps1Session implements AutoCloseable {
     private void runLoop() {
         long lastFrame = machine.getVideoTiming().getFrameCount();
         long frameStartNanos = System.nanoTime();
+        Ps1AudioClock audioClock = new Ps1AudioClock(machine.getGpu().isPal());
         try {
             while (!stopRequested) {
                 synchronized (pauseLock) {
@@ -164,12 +165,14 @@ public final class Ps1Session implements AutoCloseable {
                     lastFrame = currentFrame;
                     FrameListener listener = frameListener;
                     if (listener != null) listener.onFrame(machine.renderDisplayFrame());
+                    boolean pal = machine.getGpu().isPal();
+                    audioClock.setPal(pal);
                     AudioListener audio = audioListener;
                     if (audio != null) {
-                        int audioFrames = machine.getGpu().isPal() ? 882 : 735;
+                        int audioFrames = audioClock.nextFrameSampleCount();
                         audio.onAudio(machine.renderAudioFrames(audioFrames), Ps1Spu.SAMPLE_RATE);
                     }
-                    long framePeriod = machine.getGpu().isPal() ? PAL_FRAME_NANOS : NTSC_FRAME_NANOS;
+                    long framePeriod = pal ? PAL_FRAME_NANOS : NTSC_FRAME_NANOS;
                     long remaining = framePeriod - (System.nanoTime() - frameStartNanos);
                     if (remaining > 0) LockSupport.parkNanos(remaining);
                     frameStartNanos = System.nanoTime();

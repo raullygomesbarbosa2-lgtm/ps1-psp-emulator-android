@@ -4,7 +4,8 @@ Esta pasta contém uma fundação de projeto, não um emulador funcional nem um 
 
 - App Android nativo em Java, sem WebView.
 - App com foco exclusivo no núcleo PlayStation One (PS1), separado da interface Android.
-- A tela permite selecionar arquivos locais. Apenas um PS-X EXE pode ser carregado e iniciado em sessão experimental; BIN/CUE/ISO não são suportados e selecionar um arquivo não o inicia automaticamente.
+- A tela Android ainda só carrega PS-X EXE em sessão experimental; não inicia jogos de disco.
+- A base do motor agora interpreta CUEs BINARY e lê setores com acesso aleatório dos BINs associados; também pode tratar um ISO isolado como faixa Mode 1/2048. Extrai payloads Mode 1/Mode 2 comuns, mas isso ainda não está integrado ao seletor Android nem ao controlador de CD-ROM e não inicia jogos. CUEs não binários e faixas com tamanhos de setor diferentes dentro do mesmo bloco FILE não são aceitos.
 - O módulo PS1 contém um interpretador inteiro MIPS R3000A parcial, 2 MiB de RAM com espelhos de 8 MiB, aliases KSEG0/KSEG1 e scratchpad de 1 KiB (KUSEG/KSEG0, não KSEG1).
 - `Ps1Machine` conecta CPU e memória; o barramento mapeia I_STAT/I_MASK, fontes de IRQ e registradores de controle de memória com valores comuns programados pelo BIOS.
 - Os três timers têm contador/modo/alvo, clocks de sistema, /8 e dot clock, sincronização básica e IRQs. O raster NTSC/PAL tem 263/314 linhas; GP1 controla modo/faixas e alimenta HBlank/VBlank, ainda como modelo parcial.

@@ -1,5 +1,6 @@
 package com.raully.psxpsp.ps1;
 
+import java.io.IOException;
 import java.util.concurrent.locks.LockSupport;
 
 /**
@@ -28,8 +29,17 @@ public final class Ps1Session implements AutoCloseable {
 
     public State getState() { return state; }
     public Ps1ExecutableLoader.ExecutableInfo getExecutableInfo() { return executableInfo; }
+    public boolean hasDisc() { return machine.getBus().getCdrom().hasDisc(); }
 
-    /** Load a standalone PS-X EXE. Disc images and most BIOS services are not supported. */
+    /** Attach an already opened disc image to the machine's CD-ROM device. */
+    public synchronized void insertDisc(Ps1DiscImage image) throws IOException {
+        if (state == State.RUNNING || state == State.PAUSED || (worker != null && worker.isAlive())) {
+            throw new IllegalStateException("stop the current session before replacing the disc");
+        }
+        machine.getBus().getCdrom().insertDisc(image);
+    }
+
+    /** Load a standalone PS-X EXE for the experimental session. */
     public synchronized Ps1ExecutableLoader.ExecutableInfo loadExecutable(byte[] file) {
         if (state == State.RUNNING || state == State.PAUSED || (worker != null && worker.isAlive())) {
             throw new IllegalStateException("stop the current session before loading another executable");
@@ -80,7 +90,15 @@ public final class Ps1Session implements AutoCloseable {
         if (state != State.EMPTY) state = State.STOPPED;
     }
 
-    @Override public void close() { stop(); }
+    @Override public void close() {
+        Thread active = worker;
+        stop();
+        if (active != null && active != Thread.currentThread()) {
+            try { active.join(500); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        }
+        try { machine.getBus().getCdrom().ejectDisc(); } catch (IOException ignored) { }
+    }
 
     private void runLoop() {
         long lastFrame = machine.getVideoTiming().getFrameCount();

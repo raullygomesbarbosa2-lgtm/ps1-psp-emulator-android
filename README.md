@@ -4,9 +4,9 @@ Esta pasta contém uma fundação de projeto, não um emulador funcional nem um 
 
 - App Android nativo em Java, sem WebView.
 - App com foco exclusivo no núcleo PlayStation One (PS1), separado da interface Android.
-- A tela Android ainda só carrega PS-X EXE em sessão experimental; não inicia jogos de disco.
+- A tela Android aceita PS-X EXE em sessão experimental, ISO e CUE com os arquivos BIN referenciados. Ao abrir um CUE, pede cada arquivo associado; o disco é conectado ao controlador, mas jogos ainda não iniciam. BIN isolado exige seu CUE correspondente.
 - A base do motor interpreta CUEs BINARY, lê setores dos BINs por acesso aleatório e trata ISO isolado como faixa Mode 1/2048. O leitor extrai payloads Mode 1/Mode 2 comuns e mapeia setores por LBA; CUEs não binários e faixas com tamanhos de setor diferentes no mesmo bloco FILE não são aceitos.
-- Os registradores de CD-ROM estão mapeados no barramento. Há um modelo inicial de Getstat, Setloc, Setmode, ReadN, Pause e Init, com respostas/IRQs e entrega de setores pela FIFO quando o software habilita BFRD. Comandos síncronos, temporização e DMA do CD-ROM ainda são parciais; não está integrado ao seletor Android e não inicia jogos.
+- Os registradores de CD-ROM estão mapeados no barramento. Há um modelo inicial de Getstat, Setloc, Setmode, ReadN, Pause e Init, com respostas/IRQs e entrega de setores pela FIFO quando o software habilita BFRD. Comandos síncronos, temporização e DMA do CD-ROM ainda são parciais; não há boot de jogos.
 - O módulo PS1 contém um interpretador inteiro MIPS R3000A parcial, 2 MiB de RAM com espelhos de 8 MiB, aliases KSEG0/KSEG1 e scratchpad de 1 KiB (KUSEG/KSEG0, não KSEG1).
 - `Ps1Machine` conecta CPU e memória; o barramento mapeia I_STAT/I_MASK, fontes de IRQ e registradores de controle de memória com valores comuns programados pelo BIOS.
 - Os três timers têm contador/modo/alvo, clocks de sistema, /8 e dot clock, sincronização básica e IRQs. O raster NTSC/PAL tem 263/314 linhas; GP1 controla modo/faixas e alimenta HBlank/VBlank, ainda como modelo parcial.

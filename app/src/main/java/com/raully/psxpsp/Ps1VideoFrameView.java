@@ -23,7 +23,7 @@ public final class Ps1VideoFrameView extends View {
         setContentDescription("Saída de vídeo do núcleo PS1");
         bitmapPaint.setFilterBitmap(false);
         bitmapPaint.setDither(false);
-        placeholderPaint.setColor(Color.rgb(145, 155, 145));
+        placeholderPaint.setColor(Color.rgb(143, 205, 225));
         placeholderPaint.setTextSize(16 * getResources().getDisplayMetrics().density);
         placeholderPaint.setTextAlign(Paint.Align.CENTER);
     }

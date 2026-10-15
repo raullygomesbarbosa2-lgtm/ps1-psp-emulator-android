@@ -2,14 +2,20 @@ package com.raully.psxpsp;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.content.res.AssetFileDescriptor;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
+import android.view.InputDevice;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -17,6 +23,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 
+import com.raully.psxpsp.ps1.Ps1ControllerPort;
 import com.raully.psxpsp.ps1.Ps1CueSheet;
 import com.raully.psxpsp.ps1.Ps1DiscImage;
 import com.raully.psxpsp.ps1.Ps1ExecutableLoader;
@@ -34,8 +41,10 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 /** Tela nativa para PS-X EXE experimental e seleção de discos anexados ao CD-ROM, sem boot de jogos. */
 public final class MainActivity extends Activity {
@@ -47,11 +56,17 @@ public final class MainActivity extends Activity {
     private Uri selectedPs1Uri;
     private boolean selectedPs1Executable;
     private Ps1VideoFrameView ps1VideoView;
+    private Ps1TouchControlsView touchControls;
     private TextView ps1RunStatus;
     private Button ps1StartButton;
     private Button ps1PauseButton;
     private Button ps1StopButton;
-    private Button diagnosticButton;
+    private View homeScreen;
+    private View gameplayScreen;
+    private boolean inGameplay;
+    private int touchButtons;
+    private int axisButtons;
+    private final Set<Integer> heldGamepadKeys = new HashSet<>();
     private Ps1Session ps1Session;
     private Ps1CueSheet pendingCueSheet;
     private ArrayDeque<String> pendingCueFiles;
@@ -63,20 +78,62 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().getDecorView().setSystemUiVisibility(0);
-        getWindow().setStatusBarColor(Color.rgb(16, 20, 16));
-        getWindow().setNavigationBarColor(Color.rgb(16, 20, 16));
-        setContentView(buildScreen());
+        getWindow().setStatusBarColor(Color.rgb(7, 14, 22));
+        getWindow().setNavigationBarColor(Color.rgb(7, 14, 22));
+        setContentView(buildRoot());
+    }
+
+    private View buildRoot() {
+        FrameLayout root = new FrameLayout(this);
+        homeScreen = buildScreen();
+        root.addView(homeScreen, new FrameLayout.LayoutParams(-1, -1));
+        gameplayScreen = buildGameplayScreen();
+        gameplayScreen.setVisibility(View.GONE);
+        root.addView(gameplayScreen, new FrameLayout.LayoutParams(-1, -1));
+        return root;
+    }
+
+    private View buildGameplayScreen() {
+        FrameLayout game = new FrameLayout(this);
+        game.setBackgroundColor(Color.rgb(7, 14, 22));
+        ps1VideoView = new Ps1VideoFrameView(this);
+        game.addView(ps1VideoView, new FrameLayout.LayoutParams(-1, -1));
+        touchControls = new Ps1TouchControlsView(this, mask -> {
+            touchButtons = mask;
+            updateControllerInput();
+        });
+        game.addView(touchControls, new FrameLayout.LayoutParams(-1, -1));
+
+        LinearLayout toolbar = new LinearLayout(this);
+        toolbar.setGravity(Gravity.CENTER_VERTICAL);
+        toolbar.setPadding(dp(6), dp(2), dp(6), dp(2));
+        toolbar.setBackgroundColor(Color.argb(220, 7, 20, 34));
+        FrameLayout.LayoutParams barParams = new FrameLayout.LayoutParams(-1, dp(46), Gravity.TOP);
+        game.addView(toolbar, barParams);
+        TextView label = text("PS1 • TESTE EXPERIMENTAL", 12, Color.rgb(143, 232, 255), true);
+        toolbar.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        ps1PauseButton = new Button(this);
+        ps1PauseButton.setText("Pausar");
+        ps1PauseButton.setAllCaps(false);
+        ps1PauseButton.setOnClickListener(v -> togglePs1Pause());
+        toolbar.addView(ps1PauseButton, new LinearLayout.LayoutParams(-2, dp(42)));
+        ps1StopButton = new Button(this);
+        ps1StopButton.setText("Parar");
+        ps1StopButton.setAllCaps(false);
+        ps1StopButton.setOnClickListener(v -> stopPs1Session());
+        toolbar.addView(ps1StopButton, new LinearLayout.LayoutParams(-2, dp(42)));
+        return game;
     }
 
     private View buildScreen() {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        scroll.setBackgroundColor(Color.rgb(16, 20, 16));
+        scroll.setBackgroundColor(Color.rgb(7, 14, 22));
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(24), dp(20), dp(24));
-        root.setBackgroundColor(Color.rgb(16, 20, 16));
+        root.setBackgroundColor(Color.rgb(7, 14, 22));
         scroll.addView(root);
 
         TextView title = text("PLAYSTATION ONE", 28, Color.WHITE, true);
@@ -101,15 +158,15 @@ public final class MainActivity extends Activity {
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(16), dp(16), dp(16), dp(16));
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.rgb(28, 34, 28));
+        bg.setColor(Color.rgb(15, 29, 43));
         bg.setCornerRadius(dp(16));
-        bg.setStroke(dp(1), Color.rgb(57, 255, 20));
+        bg.setStroke(dp(1), Color.rgb(143, 232, 255));
         card.setBackground(bg);
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
         cardParams.bottomMargin = dp(14);
         root.addView(card, cardParams);
 
-        TextView heading = text(name, 18, Color.rgb(57, 255, 20), true);
+        TextView heading = text(name, 18, Color.rgb(143, 232, 255), true);
         card.addView(heading);
         TextView detail = text(description, 13, Color.LTGRAY, false);
         LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(-1, -2);
@@ -131,25 +188,19 @@ public final class MainActivity extends Activity {
     }
 
     private void addVideoPreview(LinearLayout root) {
-        TextView heading = text("SAÍDA DE VÍDEO PS1", 18, Color.rgb(57, 255, 20), true);
+        TextView heading = text("SESSÃO PS1", 18, Color.rgb(143, 232, 255), true);
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, -2);
         headingParams.topMargin = dp(18);
         root.addView(heading, headingParams);
 
-        TextView explanation = text("Prévia técnica gerada pelo núcleo — não é um jogo.", 13, Color.LTGRAY, false);
+        TextView explanation = text("Ao iniciar, o app abre a tela de jogo em paisagem e apresenta os quadros reais produzidos pelo GPU experimental. Isso não confirma compatibilidade geral.", 13, Color.LTGRAY, false);
         LinearLayout.LayoutParams explanationParams = new LinearLayout.LayoutParams(-1, -2);
         explanationParams.topMargin = dp(5);
         root.addView(explanation, explanationParams);
 
-        ps1VideoView = new Ps1VideoFrameView(this);
-        LinearLayout.LayoutParams videoParams = new LinearLayout.LayoutParams(-1, dp(220));
-        videoParams.topMargin = dp(10);
-        videoParams.bottomMargin = dp(4);
-        root.addView(ps1VideoView, videoParams);
-
-        ps1RunStatus = text("Selecione um executável PS-X EXE para iniciar uma sessão experimental.", 13, Color.LTGRAY, false);
+        ps1RunStatus = text("Selecione um executável PS-X EXE ou disco para iniciar uma sessão experimental.", 13, Color.LTGRAY, false);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
-        statusParams.topMargin = dp(8);
+        statusParams.topMargin = dp(12);
         root.addView(ps1RunStatus, statusParams);
 
         ps1StartButton = new Button(this);
@@ -161,48 +212,6 @@ public final class MainActivity extends Activity {
             else startDiscBootSession();
         });
         root.addView(ps1StartButton, new LinearLayout.LayoutParams(-1, -2));
-
-        ps1PauseButton = new Button(this);
-        ps1PauseButton.setText("Pausar sessão");
-        ps1PauseButton.setAllCaps(false);
-        ps1PauseButton.setEnabled(false);
-        ps1PauseButton.setOnClickListener(v -> togglePs1Pause());
-        root.addView(ps1PauseButton, new LinearLayout.LayoutParams(-1, -2));
-
-        ps1StopButton = new Button(this);
-        ps1StopButton.setText("Encerrar sessão");
-        ps1StopButton.setAllCaps(false);
-        ps1StopButton.setEnabled(false);
-        ps1StopButton.setOnClickListener(v -> stopPs1Session());
-        root.addView(ps1StopButton, new LinearLayout.LayoutParams(-1, -2));
-
-        diagnosticButton = new Button(this);
-        diagnosticButton.setText("Gerar prévia técnica");
-        diagnosticButton.setAllCaps(false);
-        diagnosticButton.setOnClickListener(v -> renderDiagnosticFrame(ps1VideoView));
-        root.addView(diagnosticButton, new LinearLayout.LayoutParams(-1, -2));
-    }
-
-    private void renderDiagnosticFrame(Ps1VideoFrameView videoView) {
-        Ps1Machine machine = new Ps1Machine();
-        int port = Ps1Gpu.DATA_PORT;
-        int[] colors = {
-                0x000000FF, 0x0000FF00, 0x00FF0000,
-                0x0000FFFF, 0x00FFFF00, 0x00FF00FF
-        };
-        machine.getBus().write32(port, 0x02120C08); // opaque dark background
-        machine.getBus().write32(port, 0);
-        machine.getBus().write32(port, 256 | (240 << 16));
-        for (int i = 0; i < colors.length; i++) {
-            machine.getBus().write32(port, 0x60000000 | colors[i]);
-            machine.getBus().write32(port, (24 + i * 34) | (38 << 16));
-            machine.getBus().write32(port, 30 | (68 << 16));
-        }
-        machine.getBus().write32(port, 0x20000000 | 0x00FFFFFF); // flat white triangle
-        machine.getBus().write32(port, (62) | (132 << 16));
-        machine.getBus().write32(port, (194) | (132 << 16));
-        machine.getBus().write32(port, (128) | (222 << 16));
-        videoView.present(machine.renderDisplayFrame());
     }
 
     private void openPicker() {
@@ -407,7 +416,6 @@ public final class MainActivity extends Activity {
             ps1PauseButton.setEnabled(false);
             ps1StopButton.setText("Ejetar disco");
             ps1StopButton.setEnabled(true);
-            diagnosticButton.setEnabled(true);
             ps1Selection.setText("Disco anexado: " + label);
             ps1RunStatus.setText("Imagem anexada. Boot HLE ISO9660/SYSTEM.CNF é experimental e não garante compatibilidade com jogos.");
         } catch (IOException | RuntimeException failure) {
@@ -500,6 +508,7 @@ public final class MainActivity extends Activity {
                         return;
                     }
                     ps1VideoView.clearFrame();
+                    ps1VideoView.present(candidate.renderCurrentFrame());
                     try {
                         candidate.start(frame -> {
                             if (ps1Session == candidate && !isFinishing() && !isDestroyed()) {
@@ -507,11 +516,11 @@ public final class MainActivity extends Activity {
                             }
                         });
                         ps1StartButton.setEnabled(false);
-                        ps1PauseButton.setText("Pausar sessão");
+                        ps1PauseButton.setText("Pausar");
                         ps1PauseButton.setEnabled(true);
-                        ps1StopButton.setText("Encerrar sessão");
+                        ps1StopButton.setText("Parar");
                         ps1StopButton.setEnabled(true);
-                        diagnosticButton.setEnabled(false);
+                        enterGameplay();
                         ps1RunStatus.setText("Boot HLE experimental iniciado: " + boot.executablePath
                                 + ". Não usa BIOS externa; serviços HLE e compatibilidade ainda são limitados.");
                     } catch (IllegalStateException startFailure) {
@@ -555,6 +564,7 @@ public final class MainActivity extends Activity {
                     stopPs1Session();
                     ps1Session = candidate;
                     ps1VideoView.clearFrame();
+                    ps1VideoView.present(candidate.renderCurrentFrame());
                     try {
                         candidate.start(frame -> {
                             if (ps1Session == candidate && !isFinishing() && !isDestroyed()) {
@@ -562,10 +572,11 @@ public final class MainActivity extends Activity {
                             }
                         });
                         ps1StartButton.setEnabled(false);
-                        ps1PauseButton.setText("Pausar sessão");
+                        ps1PauseButton.setText("Pausar");
                         ps1PauseButton.setEnabled(true);
+                        ps1StopButton.setText("Parar");
                         ps1StopButton.setEnabled(true);
-                        diagnosticButton.setEnabled(false);
+                        enterGameplay();
                         ps1RunStatus.setText(String.format("Sessão experimental ativa — PC 0x%08X, %d bytes. Sem HLE completo; pode não executar este programa.", info.entryPoint, info.textSize));
                     } catch (IllegalStateException startFailure) {
                         ps1Session = null;
@@ -608,31 +619,136 @@ public final class MainActivity extends Activity {
 
     private void stopPs1Session() {
         if (ps1Session != null) {
+            ps1Session.setControllerButtons(0);
             ps1Session.close();
             ps1Session = null;
         }
+        touchButtons = 0;
+        axisButtons = 0;
+        heldGamepadKeys.clear();
+        if (touchControls != null) touchControls.releaseAll();
         if (ps1PauseButton != null) {
             ps1PauseButton.setEnabled(false);
-            ps1PauseButton.setText("Pausar sessão");
+            ps1PauseButton.setText("Pausar");
         }
         if (ps1StopButton != null) {
             ps1StopButton.setEnabled(false);
-            ps1StopButton.setText("Encerrar sessão");
+            ps1StopButton.setText("Parar");
         }
-        if (diagnosticButton != null) diagnosticButton.setEnabled(true);
         if (ps1StartButton != null) ps1StartButton.setEnabled(selectedPs1Executable);
-        if (ps1RunStatus != null) ps1RunStatus.setText("Sessão encerrada.");
+        exitGameplay();
+        if (ps1RunStatus != null) ps1RunStatus.setText("Sessão encerrada. A compatibilidade geral não foi validada.");
+    }
+
+    private void enterGameplay() {
+        if (gameplayScreen == null || homeScreen == null) return;
+        inGameplay = true;
+        homeScreen.setVisibility(View.GONE);
+        gameplayScreen.setVisibility(View.VISIBLE);
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        updateControllerInput();
+    }
+
+    private void exitGameplay() {
+        if (!inGameplay) return;
+        inGameplay = false;
+        if (gameplayScreen != null) gameplayScreen.setVisibility(View.GONE);
+        if (homeScreen != null) homeScreen.setVisibility(View.VISIBLE);
+        getWindow().getDecorView().setSystemUiVisibility(0);
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        if (ps1VideoView != null) ps1VideoView.clearFrame();
+    }
+
+    private void updateControllerInput() {
+        if (ps1Session != null) ps1Session.setControllerButtons(touchButtons | axisButtons | keyButtons());
+    }
+
+    private int keyButtons() {
+        int mask = 0;
+        for (int keyCode : heldGamepadKeys) mask |= buttonForKey(keyCode);
+        return mask;
+    }
+
+    private static int buttonForKey(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_UP: case KeyEvent.KEYCODE_BUTTON_DPAD_UP: return Ps1ControllerPort.UP;
+            case KeyEvent.KEYCODE_DPAD_RIGHT: case KeyEvent.KEYCODE_BUTTON_DPAD_RIGHT: return Ps1ControllerPort.RIGHT;
+            case KeyEvent.KEYCODE_DPAD_DOWN: case KeyEvent.KEYCODE_BUTTON_DPAD_DOWN: return Ps1ControllerPort.DOWN;
+            case KeyEvent.KEYCODE_DPAD_LEFT: case KeyEvent.KEYCODE_BUTTON_DPAD_LEFT: return Ps1ControllerPort.LEFT;
+            case KeyEvent.KEYCODE_BUTTON_A: return Ps1ControllerPort.CROSS;
+            case KeyEvent.KEYCODE_BUTTON_B: return Ps1ControllerPort.CIRCLE;
+            case KeyEvent.KEYCODE_BUTTON_X: return Ps1ControllerPort.SQUARE;
+            case KeyEvent.KEYCODE_BUTTON_Y: return Ps1ControllerPort.TRIANGLE;
+            case KeyEvent.KEYCODE_BUTTON_L1: return Ps1ControllerPort.L1;
+            case KeyEvent.KEYCODE_BUTTON_L2: return Ps1ControllerPort.L2;
+            case KeyEvent.KEYCODE_BUTTON_R1: return Ps1ControllerPort.R1;
+            case KeyEvent.KEYCODE_BUTTON_R2: return Ps1ControllerPort.R2;
+            case KeyEvent.KEYCODE_BUTTON_SELECT: return Ps1ControllerPort.SELECT;
+            case KeyEvent.KEYCODE_BUTTON_START: return Ps1ControllerPort.START;
+            case KeyEvent.KEYCODE_BUTTON_THUMBL: return Ps1ControllerPort.L3;
+            case KeyEvent.KEYCODE_BUTTON_THUMBR: return Ps1ControllerPort.R3;
+            default: return 0;
+        }
+    }
+
+    @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
+        int mask = buttonForKey(keyCode);
+        if (inGameplay && mask != 0) {
+            heldGamepadKeys.add(keyCode);
+            updateControllerInput();
+            return true;
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    @Override public boolean onKeyUp(int keyCode, KeyEvent event) {
+        int mask = buttonForKey(keyCode);
+        if (inGameplay && mask != 0) {
+            heldGamepadKeys.remove(keyCode);
+            updateControllerInput();
+            return true;
+        }
+        return super.onKeyUp(keyCode, event);
+    }
+
+    @Override public boolean onGenericMotionEvent(MotionEvent event) {
+        if (inGameplay && (event.isFromSource(InputDevice.SOURCE_JOYSTICK)
+                || event.isFromSource(InputDevice.SOURCE_GAMEPAD))) {
+            float x = event.getAxisValue(MotionEvent.AXIS_X);
+            float y = event.getAxisValue(MotionEvent.AXIS_Y);
+            float hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X);
+            float hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y);
+            int mask = 0;
+            if (x < -0.45f || hatX < -0.5f) mask |= Ps1ControllerPort.LEFT;
+            if (x > 0.45f || hatX > 0.5f) mask |= Ps1ControllerPort.RIGHT;
+            if (y < -0.45f || hatY < -0.5f) mask |= Ps1ControllerPort.UP;
+            if (y > 0.45f || hatY > 0.5f) mask |= Ps1ControllerPort.DOWN;
+            axisButtons = mask;
+            updateControllerInput();
+            return true;
+        }
+        return super.onGenericMotionEvent(event);
+    }
+
+    @Override public void onBackPressed() {
+        if (inGameplay) stopPs1Session();
+        else super.onBackPressed();
     }
 
     private void togglePs1Pause() {
         if (ps1Session == null) return;
         if (ps1Session.getState() == Ps1Session.State.RUNNING) {
             ps1Session.pause();
-            ps1PauseButton.setText("Retomar sessão");
+            ps1PauseButton.setText("Retomar");
             ps1RunStatus.setText("Sessão pausada.");
         } else if (ps1Session.getState() == Ps1Session.State.PAUSED) {
             ps1Session.resume();
-            ps1PauseButton.setText("Pausar sessão");
+            ps1PauseButton.setText("Pausar");
             ps1RunStatus.setText("Sessão experimental ativa.");
         }
     }
@@ -642,7 +758,7 @@ public final class MainActivity extends Activity {
         activityResumed = false;
         if (ps1Session != null && ps1Session.getState() == Ps1Session.State.RUNNING) {
             ps1Session.pause();
-            if (ps1PauseButton != null) ps1PauseButton.setText("Retomar sessão");
+            if (ps1PauseButton != null) ps1PauseButton.setText("Retomar");
         }
         super.onPause();
     }
@@ -653,7 +769,7 @@ public final class MainActivity extends Activity {
         activityResumed = true;
         if (ps1Session != null && ps1Session.getState() == Ps1Session.State.PAUSED) {
             ps1Session.resume();
-            if (ps1PauseButton != null) ps1PauseButton.setText("Pausar sessão");
+            if (ps1PauseButton != null) ps1PauseButton.setText("Pausar");
         }
     }
 

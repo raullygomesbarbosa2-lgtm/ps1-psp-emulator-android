@@ -18,5 +18,4 @@ android {
 dependencies {
     implementation project(':engine:common')
     implementation project(':engine:ps1')
-    implementation project(':engine:psp')
 }

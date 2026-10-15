@@ -26,8 +26,6 @@ import java.io.InputStream;
 /** Tela inicial nativa com prévia GPU e execução experimental de PS-X EXE, sem suporte a jogos de disco. */
 public final class MainActivity extends Activity {
     private TextView ps1Selection;
-    private TextView pspSelection;
-    private int pendingSystem = 0;
     private Uri selectedPs1Uri;
     private boolean selectedPs1Executable;
     private Ps1VideoFrameView ps1VideoView;
@@ -59,15 +57,14 @@ public final class MainActivity extends Activity {
         root.setBackgroundColor(Color.rgb(16, 20, 16));
         scroll.addView(root);
 
-        TextView title = text("PS1 + PSP", 28, Color.WHITE, true);
+        TextView title = text("PLAYSTATION ONE", 28, Color.WHITE, true);
         root.addView(title);
-        TextView subtitle = text("Bibliotecas separadas • projeto em desenvolvimento", 14, Color.LTGRAY, false);
+        TextView subtitle = text("Emulador PS1 nativo • projeto em desenvolvimento", 14, Color.LTGRAY, false);
         LinearLayout.LayoutParams subParams = new LinearLayout.LayoutParams(-1, -2);
         subParams.bottomMargin = dp(18);
         root.addView(subtitle, subParams);
 
-        ps1Selection = addLibraryCard(root, "PLAYSTATION 1", "Núcleo parcial — ainda não inicia jogos", 1);
-        pspSelection = addLibraryCard(root, "PLAYSTATION PORTABLE", "Núcleo próprio — etapa futura, ainda não implementado", 2);
+        ps1Selection = addLibraryCard(root, "PLAYSTATION 1", "Núcleo parcial — ainda não inicia jogos");
 
         TextView note = text("Selecionar um arquivo não inicia a sessão automaticamente. Só PS-X EXE pode ser iniciado em modo experimental; jogos BIN/CUE/ISO ainda não rodam.", 13, Color.LTGRAY, false);
         LinearLayout.LayoutParams noteParams = new LinearLayout.LayoutParams(-1, -2);
@@ -77,7 +74,7 @@ public final class MainActivity extends Activity {
         return scroll;
     }
 
-    private TextView addLibraryCard(LinearLayout root, String name, String description, int system) {
+    private TextView addLibraryCard(LinearLayout root, String name, String description) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(16), dp(16), dp(16), dp(16));
@@ -104,7 +101,7 @@ public final class MainActivity extends Activity {
         Button choose = new Button(this);
         choose.setText("Selecionar arquivo local");
         choose.setAllCaps(false);
-        choose.setOnClickListener(v -> openPicker(system));
+        choose.setOnClickListener(v -> openPicker());
         LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(-1, -2);
         buttonParams.topMargin = dp(8);
         card.addView(choose, buttonParams);
@@ -183,30 +180,26 @@ public final class MainActivity extends Activity {
         videoView.present(machine.renderDisplayFrame());
     }
 
-    private void openPicker(int system) {
-        pendingSystem = system;
+    private void openPicker() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("*/*");
-        startActivityForResult(intent, 100 + system);
+        startActivityForResult(intent, 101);
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null || requestCode != 101) return;
         Uri uri = data.getData();
         try {
             getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
         } catch (SecurityException ignored) { }
         String label = "Arquivo selecionado: " + uri.getLastPathSegment();
-        TextView destination = (requestCode == 101) ? ps1Selection : (requestCode == 102 ? pspSelection : null);
-        if (destination != null) destination.setText(label);
-        if (requestCode == 101) {
-            if (ps1Session != null) stopPs1Session();
-            selectedPs1Uri = uri;
-            inspectSelectedPs1File(uri);
-        }
+        ps1Selection.setText(label);
+        if (ps1Session != null) stopPs1Session();
+        selectedPs1Uri = uri;
+        inspectSelectedPs1File(uri);
     }
 
     private void inspectSelectedPs1File(Uri uri) {

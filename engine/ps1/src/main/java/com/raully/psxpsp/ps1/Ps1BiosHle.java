@@ -37,9 +37,13 @@ final class Ps1BiosHle {
 
         int function = cpu.getRegister(9) & 0xFF; // t1 selects a table entry
         int result;
-        if (vector == VECTOR_A0) result = dispatchA0(machine, function);
-        else if (vector == VECTOR_B0) result = dispatchB0(machine, function);
-        else result = dispatchC0(machine, function);
+        try {
+            if (vector == VECTOR_A0) result = dispatchA0(machine, function);
+            else if (vector == VECTOR_B0) result = dispatchB0(machine, function);
+            else result = dispatchC0(machine, function);
+        } catch (Ps1Bus.BusFaultException invalidPointer) {
+            result = -1;
+        }
         cpu.returnFromHleCall(result);
         return true;
     }
@@ -47,6 +51,24 @@ final class Ps1BiosHle {
     private int dispatchA0(Ps1Machine machine, int function) {
         MipsR3000A cpu = machine.getCpu();
         switch (function) {
+            case 0x27: { // bcopy(src, dst, length)
+                int destination = copyBytes(machine, cpu.getRegister(4), cpu.getRegister(5), cpu.getRegister(6), true);
+                return destination == -1 ? -1 : 0;
+            }
+            case 0x28: { // bzero(dst, length)
+                int destination = fillBytes(machine, cpu.getRegister(4), 0, cpu.getRegister(5));
+                return destination == -1 ? -1 : 0;
+            }
+            case 0x2A: // memcpy(dst, src, length)
+                return copyBytes(machine, cpu.getRegister(5), cpu.getRegister(4), cpu.getRegister(6), false);
+            case 0x2B: // memset(dst, value, length)
+                return fillBytes(machine, cpu.getRegister(4), cpu.getRegister(5), cpu.getRegister(6));
+            case 0x2C: // memmove(dst, src, length)
+                return copyBytes(machine, cpu.getRegister(5), cpu.getRegister(4), cpu.getRegister(6), true);
+            case 0x2D: // memcmp(src1, src2, length)
+                return compareBytes(machine, cpu.getRegister(4), cpu.getRegister(5), cpu.getRegister(6));
+            case 0x2E: // memchr(src, value, length)
+                return findByte(machine, cpu.getRegister(4), cpu.getRegister(5), cpu.getRegister(6));
             case 0x33: // malloc(size)
                 return allocate(cpu.getRegister(4));
             case 0x34: // free(buf)
@@ -61,6 +83,51 @@ final class Ps1BiosHle {
             default:
                 return -1; // File/stdio, string, and other A0 calls are not implemented.
         }
+    }
+
+    private int copyBytes(Ps1Machine machine, int source, int destination, int length, boolean overlapSafe) {
+        if (!validMemoryOperationLength(length)) return -1;
+        if (length == 0) return destination;
+        Ps1MemoryBus bus = machine.getBus();
+        boolean backwards = overlapSafe && (long) destination > (long) source
+                && (long) destination < (long) source + length;
+        if (backwards) {
+            for (int i = length - 1; i >= 0; i--) bus.write8(destination + i, bus.read8(source + i));
+        } else {
+            for (int i = 0; i < length; i++) bus.write8(destination + i, bus.read8(source + i));
+        }
+        return destination;
+    }
+
+    private int fillBytes(Ps1Machine machine, int destination, int value, int length) {
+        if (!validMemoryOperationLength(length)) return -1;
+        Ps1MemoryBus bus = machine.getBus();
+        for (int i = 0; i < length; i++) bus.write8(destination + i, value);
+        return destination;
+    }
+
+    private int compareBytes(Ps1Machine machine, int first, int second, int length) {
+        if (!validMemoryOperationLength(length)) return -1;
+        Ps1MemoryBus bus = machine.getBus();
+        for (int i = 0; i < length; i++) {
+            int difference = bus.read8(first + i) - bus.read8(second + i);
+            if (difference != 0) return difference;
+        }
+        return 0;
+    }
+
+    private int findByte(Ps1Machine machine, int source, int value, int length) {
+        if (!validMemoryOperationLength(length)) return -1;
+        Ps1MemoryBus bus = machine.getBus();
+        int target = value & 0xFF;
+        for (int i = 0; i < length; i++) {
+            if (bus.read8(source + i) == target) return source + i;
+        }
+        return 0;
+    }
+
+    private static boolean validMemoryOperationLength(int length) {
+        return length >= 0 && length <= Ps1MemoryBus.RAM_SIZE;
     }
 
     private int dispatchB0(Ps1Machine machine, int function) {
@@ -109,8 +176,10 @@ final class Ps1BiosHle {
     private int initializeHeap(int address, int size) {
         if (size < 0) return -1;
 
-        long alignedAddress = ((long) address + 3L) & ~3L;
-        long skippedBytes = alignedAddress - (long) address;
+        long unsignedAddress = Integer.toUnsignedLong(address);
+        long alignedAddress = (unsignedAddress + 3L) & ~3L;
+        if (alignedAddress > 0xFFFFFFFFL) return -1;
+        long skippedBytes = alignedAddress - unsignedAddress;
         long usableSize = (long) size - skippedBytes;
         if (usableSize < 0 || usableSize > Integer.MAX_VALUE) return -1;
         int alignedBase = (int) alignedAddress;

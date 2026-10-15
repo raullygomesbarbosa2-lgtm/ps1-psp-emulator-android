@@ -43,9 +43,11 @@ public class Ps1BiosHleMemoryTest {
     @Test
     public void invalidHeapRangeAndUnimplementedA0CallFailExplicitly() {
         Ps1Machine machine = new Ps1Machine();
+        assertEquals(0, invokeA0(machine, 0x39, HEAP_BASE, 0x100, 0, 0));
         assertEquals(-1, invokeA0(machine, 0x39, 0x801FF000, 0x2000, 0, 0));
+        assertEquals(-1, invokeA0(machine, 0x39, 0xFFFFFFFF, 0x20, 0, 0));
+        assertEquals(HEAP_BASE, invokeA0(machine, 0x33, 16, 0, 0, 0));
         assertEquals(-1, invokeA0(machine, 0x00, 0, 0, 0, 0)); // FileOpen needs an unimplemented file system.
-        assertEquals(0, invokeA0(machine, 0x33, 16, 0, 0, 0));
     }
 
     private static int invokeA0(Ps1Machine machine, int function, int a0, int a1, int a2, int a3) {

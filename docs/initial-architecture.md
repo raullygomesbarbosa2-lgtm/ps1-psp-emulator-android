@@ -1,9 +1,9 @@
-# Projeto: emulador Android de PS1 e PSP — do zero
+# Projeto: emulador Android de PlayStation One — do zero
 
 ## Objetivo confirmado
 
 - Aplicativo **Android nativo**, sem WebView.
-- Dois sistemas independentes: PlayStation 1 (PS1/PlayStation One) e PlayStation Portable (PSP), cada um com sua própria biblioteca e núcleo de emulação.
+- Um único sistema no escopo: PlayStation 1 (PS1/PlayStation One), com biblioteca e núcleo próprios.
 - Implementar os núcleos de emulação do zero, sem incorporar código de outros emuladores.
 - O PS1 deve iniciar sem exigir uma imagem de BIOS externa, por meio de uma camada HLE (High-Level Emulation) própria. HLE não garante compatibilidade total: alguns jogos podem depender de comportamentos específicos da BIOS original.
 - Não incluir jogos ou BIOS no aplicativo. O usuário seleciona arquivos que já possui.
@@ -13,7 +13,7 @@
 ```text
 app/
   src/main/                 Interface Android nativa e ciclo de vida
-  ├── catalog/              Bibliotecas separadas: PS1 e PSP
+  ├── catalog/              Biblioteca PS1
   ├── files/                Seleção de arquivos via Storage Access Framework
   ├── settings/             Preferências por sistema e por jogo
   └── emulation/            Contrato comum para iniciar, pausar e encerrar uma sessão
@@ -30,27 +30,24 @@ engine/
     spu/                    Áudio
     input/                  Controles e mapeamento de botões
     hle/                    Serviços de inicialização e BIOS HLE
-  psp/                      Núcleo PSP próprio, etapa posterior e independente
 
 renderer/
   android/                  Apresentação de imagem e áudio no Android
 
 validation/
   ps1/                      Testes determinísticos e verificações por componente
-  psp/                      Testes do núcleo PSP quando essa etapa começar
 ```
 
-A estrutura é uma proposta de organização. `engine/ps1` conecta CPU MIPS R3000A parcial, RAM/scratchpad, interrupções, timers e GPU parcial. Um carregador PS-X EXE inicia uma sessão experimental; o scheduler provisório avança um ciclo de sistema por instrução e emite snapshots ao completar quadros. `Ps1VideoFrameView` os apresenta em Canvas nativo. O HLE atende a algumas rotinas A0 de heap, serviços B0 de eventos/timers e C0 InitRCnt; não emula arquivos/stdio A0, HLE completo, jogos de disco ou compatibilidade de jogos.
+A estrutura é uma proposta de organização. `engine/ps1` conecta CPU MIPS R3000A parcial, RAM/scratchpad, interrupções, timers e GPU parcial. Um carregador PS-X EXE inicia uma sessão experimental; o scheduler provisório avança um ciclo de sistema por instrução e emite snapshots ao completar quadros. `Ps1VideoFrameView` os apresenta em Canvas nativo. O HLE atende a algumas rotinas A0 de heap e memória, serviços B0 de eventos/timers e C0 InitRCnt; não emula arquivos/stdio A0, HLE completo, jogos de disco ou compatibilidade de jogos.
 
 ## Sequência de desenvolvimento
 
-1. **Fundação Android:** projeto nativo, telas iniciais e navegação entre as bibliotecas PS1 e PSP.
-2. **Catálogo local:** importar jogos escolhidos pelo usuário por seletor de arquivos do Android; manter listas separadas, sem baixar ou fornecer jogos.
+1. **Fundação Android:** projeto nativo com navegação e biblioteca exclusivas do PS1.
+2. **Catálogo local:** importar arquivos escolhidos pelo usuário por seletor do Android, sem baixar ou fornecer jogos.
 3. **Base verificável do PS1:** CPU, memória, IRQs, timers, GP1, transferências GP0/VRAM, primitivas, carregamento PS-X EXE, quadros de sessão e eventos BIOS parciais têm testes unitários. Próximo: ampliar HLE, temporização e dispositivos antes de aumentar a compatibilidade.
 4. **HLE e dispositivos:** inicialização HLE, DMA, controles e leitura de disco; integrar eventos reais de vídeo aos timers e registrar claramente o que ainda não é compatível.
 5. **Imagem e áudio:** GPU e SPU próprios; primeiro objetivo é executar conteúdo de teste simples e documentado, não prometer compatibilidade universal.
 6. **Teste em aparelhos:** validar desempenho, estabilidade e compatibilidade em Android antigo e recente; corrigir antes de chamar qualquer build de jogável.
-7. **PSP:** iniciar o núcleo PSP como projeto separado somente depois de a fundação e o fluxo de testes estarem estabelecidos. É um escopo muito maior e não deve ser apresentado como concluído junto com o primeiro protótipo PS1.
 
 ## Critérios para chamar uma versão de jogável
 

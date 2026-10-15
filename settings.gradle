@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = 'PS1-PSP-FromScratch'
-include ':app', ':engine:common', ':engine:ps1', ':engine:psp'
+rootProject.name = 'PlayStationOne-FromScratch'
+include ':app', ':engine:common', ':engine:ps1'

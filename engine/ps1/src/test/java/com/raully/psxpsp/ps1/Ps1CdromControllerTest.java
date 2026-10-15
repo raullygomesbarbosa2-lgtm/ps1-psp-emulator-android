@@ -23,7 +23,7 @@ public class Ps1CdromControllerTest {
         assertEquals(1, bus.read8(Ps1MemoryBus.CDROM_BASE) & 3);
         assertEquals(3, bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 7);
         assertEquals(0, bus.read8(Ps1MemoryBus.CDROM_BASE + 1)); // No disc inserted.
-        bus.write8(Ps1MemoryBus.CDROM_BASE + 3, 0x80);
+        bus.write8(Ps1MemoryBus.CDROM_BASE + 3, 1 << 2); // W1C INT3.
         assertEquals(0, bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 7);
     }
 
@@ -67,6 +67,18 @@ public class Ps1CdromControllerTest {
             assertEquals(0x44, bus.read8(Ps1MemoryBus.CDROM_BASE + 2));
         }
         assertEquals(0, bus.read8(Ps1MemoryBus.CDROM_BASE) & 0x40);
+
+        bus.write8(Ps1MemoryBus.CDROM_BASE, 0);
+        bus.write8(Ps1MemoryBus.CDROM_BASE + 1, 0x06); // ReadN continues at the next LBA.
+        acknowledgeCurrentResponse(bus, 3);
+        machine.tickSystemCycles(Ps1CdromController.SINGLE_SPEED_SECTOR_CYCLES);
+        acknowledgeCurrentResponse(bus, 1);
+        bus.write8(Ps1MemoryBus.CDROM_BASE, 0);
+        assertEquals(0x40, bus.read8(Ps1MemoryBus.CDROM_BASE) & 0x40);
+        for (int i = 0; i < 2048; i++) {
+            assertEquals(0x55, bus.read8(Ps1MemoryBus.CDROM_BASE + 2));
+        }
+        assertEquals(0, bus.read8(Ps1MemoryBus.CDROM_BASE) & 0x40);
         assertFalse(source.closed);
         bus.getCdrom().ejectDisc();
         assertTrue(source.closed);
@@ -76,7 +88,7 @@ public class Ps1CdromControllerTest {
         bus.write8(Ps1MemoryBus.CDROM_BASE, 1);
         assertEquals(expectedCode, bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 7);
         bus.read8(Ps1MemoryBus.CDROM_BASE + 1);
-        bus.write8(Ps1MemoryBus.CDROM_BASE + 3, 0x80);
+        bus.write8(Ps1MemoryBus.CDROM_BASE + 3, 1 << (expectedCode - 1));
     }
 
     private static final class MemorySource implements Ps1DiscImage.DataSource {

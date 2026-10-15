@@ -86,9 +86,9 @@ public final class MainActivity extends Activity {
         subParams.bottomMargin = dp(18);
         root.addView(subtitle, subParams);
 
-        ps1Selection = addLibraryCard(root, "PLAYSTATION 1", "Núcleo parcial — ainda não inicia jogos");
+        ps1Selection = addLibraryCard(root, "PLAYSTATION 1", "Núcleo parcial — boot HLE de discos em teste experimental");
 
-        TextView note = text("PS-X EXE funciona apenas em teste experimental. CUE/BIN/ISO podem ser anexados ao CD-ROM, mas o emulador ainda não inicia jogos de disco.", 13, Color.LTGRAY, false);
+        TextView note = text("PS-X EXE e boot de ISO/CUE com SYSTEM.CNF são experimentais. BIOS HLE, CPU, GPU, CD-ROM e controles ainda são parciais; não há compatibilidade garantida com jogos.", 13, Color.LTGRAY, false);
         LinearLayout.LayoutParams noteParams = new LinearLayout.LayoutParams(-1, -2);
         noteParams.topMargin = dp(4);
         root.addView(note, noteParams);
@@ -153,10 +153,13 @@ public final class MainActivity extends Activity {
         root.addView(ps1RunStatus, statusParams);
 
         ps1StartButton = new Button(this);
-        ps1StartButton.setText("Iniciar sessão PS-X EXE (teste)");
+        ps1StartButton.setText("Iniciar sessão experimental");
         ps1StartButton.setAllCaps(false);
         ps1StartButton.setEnabled(false);
-        ps1StartButton.setOnClickListener(v -> startStandaloneExeSession());
+        ps1StartButton.setOnClickListener(v -> {
+            if (selectedPs1Executable) startStandaloneExeSession();
+            else startDiscBootSession();
+        });
         root.addView(ps1StartButton, new LinearLayout.LayoutParams(-1, -2));
 
         ps1PauseButton = new Button(this);
@@ -268,8 +271,9 @@ public final class MainActivity extends Activity {
             }
         } catch (IOException | SecurityException ignored) { }
         ps1StartButton.setEnabled(selectedPs1Executable);
+        ps1StartButton.setText("Iniciar sessão PS-X EXE (teste)");
         ps1RunStatus.setText(selectedPs1Executable
-                ? "PS-X EXE detectado. Início experimental, sem BIOS externa nem HLE completo."
+                ? "PS-X EXE detectado. Início experimental, sem BIOS externa nem serviços HLE completos."
                 : "O arquivo não parece ser um PS-X EXE válido.");
     }
 
@@ -398,13 +402,14 @@ public final class MainActivity extends Activity {
             stopPs1Session();
             ps1Session = candidate;
             selectedPs1Executable = false;
-            ps1StartButton.setEnabled(false);
+            ps1StartButton.setText("Tentar iniciar jogo do disco (HLE)");
+            ps1StartButton.setEnabled(true);
             ps1PauseButton.setEnabled(false);
             ps1StopButton.setText("Ejetar disco");
             ps1StopButton.setEnabled(true);
             diagnosticButton.setEnabled(true);
             ps1Selection.setText("Disco anexado: " + label);
-            ps1RunStatus.setText("Imagem anexada ao CD-ROM. O núcleo ainda não inicia jogos de disco.");
+            ps1RunStatus.setText("Imagem anexada. Boot HLE ISO9660/SYSTEM.CNF é experimental e não garante compatibilidade com jogos.");
         } catch (IOException | RuntimeException failure) {
             candidate.close();
             ps1RunStatus.setText("Não consegui anexar a imagem ao controlador de CD-ROM.");
@@ -472,6 +477,58 @@ public final class MainActivity extends Activity {
     private static String baseName(String path) {
         int separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
         return separator >= 0 ? path.substring(separator + 1) : path;
+    }
+
+    private void startDiscBootSession() {
+        final Ps1Session candidate = ps1Session;
+        if (candidate == null || !candidate.hasDisc() || ps1StartButton == null) return;
+        ps1StartButton.setEnabled(false);
+        ps1RunStatus.setText("Lendo SYSTEM.CNF e carregando o executável de boot pelo HLE experimental...");
+        Thread loader = new Thread(() -> {
+            try {
+                Ps1Session.DiscBootInfo boot = candidate.bootDisc();
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || ps1Session != candidate) return;
+                    if (!candidate.hasDisc()) {
+                        ps1StartButton.setEnabled(false);
+                        ps1RunStatus.setText("O disco foi ejetado antes da conclusão do boot experimental.");
+                        return;
+                    }
+                    if (!activityResumed) {
+                        ps1StartButton.setEnabled(candidate.hasDisc());
+                        ps1RunStatus.setText("Boot preparado. Toque novamente para iniciar a sessão experimental.");
+                        return;
+                    }
+                    ps1VideoView.clearFrame();
+                    try {
+                        candidate.start(frame -> {
+                            if (ps1Session == candidate && !isFinishing() && !isDestroyed()) {
+                                ps1VideoView.present(frame);
+                            }
+                        });
+                        ps1StartButton.setEnabled(false);
+                        ps1PauseButton.setText("Pausar sessão");
+                        ps1PauseButton.setEnabled(true);
+                        ps1StopButton.setText("Encerrar sessão");
+                        ps1StopButton.setEnabled(true);
+                        diagnosticButton.setEnabled(false);
+                        ps1RunStatus.setText("Boot HLE experimental iniciado: " + boot.executablePath
+                                + ". Não usa BIOS externa; serviços HLE e compatibilidade ainda são limitados.");
+                    } catch (IllegalStateException startFailure) {
+                        ps1StartButton.setEnabled(candidate.hasDisc());
+                        ps1RunStatus.setText("O executável foi carregado, mas não consegui iniciar a sessão.");
+                    }
+                });
+            } catch (IOException | RuntimeException failure) {
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || ps1Session != candidate) return;
+                    ps1StartButton.setEnabled(candidate.hasDisc());
+                    ps1RunStatus.setText("Não consegui encontrar ou carregar o BOOT do disco. Confira SYSTEM.CNF e o executável.");
+                });
+            }
+        }, "ps1-disc-boot");
+        loader.setDaemon(true);
+        loader.start();
     }
 
     private void startStandaloneExeSession() {

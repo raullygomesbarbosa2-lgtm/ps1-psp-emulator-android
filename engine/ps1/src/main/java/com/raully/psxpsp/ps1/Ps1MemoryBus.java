@@ -15,6 +15,7 @@ public final class Ps1MemoryBus implements Ps1Bus {
     public static final int INTERRUPT_STATUS = 0x1F801070;
     public static final int INTERRUPT_MASK = 0x1F801074;
     public static final int CDROM_BASE = Ps1CdromController.BASE_ADDRESS;
+    public static final int DMA_BASE = Ps1DmaController.BASE_ADDRESS;
     public static final int GPU_CONTROL = 0x1F801814;
 
     private final byte[] ram = new byte[RAM_SIZE];
@@ -25,6 +26,11 @@ public final class Ps1MemoryBus implements Ps1Bus {
     private final Ps1VideoTiming videoTiming = new Ps1VideoTiming(timers);
     private final Ps1Gpu gpu = new Ps1Gpu(videoTiming, interruptController);
     private final Ps1CdromController cdrom = new Ps1CdromController(interruptController);
+    private final Ps1DmaController dma;
+
+    public Ps1MemoryBus() {
+        dma = new Ps1DmaController(this, interruptController, gpu, cdrom);
+    }
 
     public Ps1InterruptController getInterruptController() { return interruptController; }
     public Ps1MemoryControl getMemoryControl() { return memoryControl; }
@@ -32,6 +38,7 @@ public final class Ps1MemoryBus implements Ps1Bus {
     public Ps1VideoTiming getVideoTiming() { return videoTiming; }
     public Ps1Gpu getGpu() { return gpu; }
     public Ps1CdromController getCdrom() { return cdrom; }
+    public Ps1DmaController getDma() { return dma; }
 
     @Override
     public boolean isInterruptPending() {
@@ -43,6 +50,10 @@ public final class Ps1MemoryBus implements Ps1Bus {
         int physicalAddress = toPhysicalAddress(address, false);
         if (isCdromAddress(physicalAddress)) {
             return cdrom.readRegister(physicalAddress - CDROM_BASE);
+        }
+        if (dma.isMappedAddress(physicalAddress)) {
+            int word = dma.readRegister(physicalAddress - DMA_BASE);
+            return (word >>> ((physicalAddress & 3) * 8)) & 0xFF;
         }
         if (timers.isMappedAddress(physicalAddress)) {
             int word = timers.readRegister(physicalAddress & ~3);
@@ -76,6 +87,9 @@ public final class Ps1MemoryBus implements Ps1Bus {
     public int read32(int address) {
         int physicalAddress = toPhysicalAddress(address, false);
         if (timers.isMappedAddress(physicalAddress)) return timers.readRegister(physicalAddress & ~3) & 0xFFFF;
+        if (dma.isMappedAddress(physicalAddress) && (physicalAddress & 3) == 0) {
+            return dma.readRegister(physicalAddress - DMA_BASE);
+        }
         return read16(address) | (read16(address + 2) << 16);
     }
 
@@ -84,6 +98,11 @@ public final class Ps1MemoryBus implements Ps1Bus {
         int physicalAddress = toPhysicalAddress(address, true);
         if (isCdromAddress(physicalAddress)) {
             cdrom.writeRegister(physicalAddress - CDROM_BASE, value);
+            return;
+        }
+        if (dma.isMappedAddress(physicalAddress)) {
+            int shift = (physicalAddress & 3) * 8;
+            dma.writeRegister(physicalAddress - DMA_BASE, (value & 0xFF) << shift, 0xFF << shift);
             return;
         }
         if (timers.isMappedAddress(physicalAddress)) {
@@ -136,6 +155,10 @@ public final class Ps1MemoryBus implements Ps1Bus {
             gpu.writeControlWord(value);
             return;
         }
+        if (dma.isMappedAddress(physicalAddress) && (physicalAddress & 3) == 0) {
+            dma.writeRegister(physicalAddress - DMA_BASE, value, -1);
+            return;
+        }
         if (timers.isMappedAddress(physicalAddress)) {
             timers.writeRegister(physicalAddress & ~3, value, 0xFFFF);
             return;
@@ -152,6 +175,7 @@ public final class Ps1MemoryBus implements Ps1Bus {
         memoryControl.resetToCommonBiosValues();
         timers.reset();
         cdrom.reset();
+        dma.reset();
         gpu.clear();
     }
 

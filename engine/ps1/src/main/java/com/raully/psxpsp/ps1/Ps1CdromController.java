@@ -54,7 +54,15 @@ public final class Ps1CdromController {
     }
 
     public synchronized boolean hasDisc() { return discImage != null; }
+    public synchronized Ps1DiscImage getDiscImage() { return discImage; }
     public synchronized int getReadMode() { return readMode; }
+
+    /** Consume one little-endian word from the data FIFO for DMA; returns -1 until four bytes are ready. */
+    public synchronized int readDmaWord() {
+        if (dataFifo.size() < 4) return -1;
+        return popByte(dataFifo) | (popByte(dataFifo) << 8)
+                | (popByte(dataFifo) << 16) | (popByte(dataFifo) << 24);
+    }
 
     public synchronized int readRegister(int registerOffset) {
         int offset = registerOffset & 3;
@@ -106,6 +114,7 @@ public final class Ps1CdromController {
             int length = discImage.readUserDataSectorAtLba(nextReadLba, payload, 0);
             pendingSector = Arrays.copyOf(payload, length);
             nextReadLba++;
+            queuePendingSectorToFifo();
             emitResponse(IRQ_INT1, driveStatus);
         } catch (IOException | RuntimeException failure) {
             stopReading();
@@ -258,14 +267,18 @@ public final class Ps1CdromController {
             pendingSector = null;
             return;
         }
-        if (pendingSector != null && dataFifo.isEmpty()) {
-            for (byte data : pendingSector) dataFifo.addLast(data & 0xFF);
-            pendingSector = null;
-        }
+        queuePendingSectorToFifo();
+    }
+
+    private void queuePendingSectorToFifo() {
+        if ((requestRegister & 0x80) == 0 || pendingSector == null || !dataFifo.isEmpty()) return;
+        for (byte data : pendingSector) dataFifo.addLast(data & 0xFF);
+        pendingSector = null;
     }
 
     private void acknowledgeAndControl(int value) {
-        if ((value & 0x80) != 0) interruptFlags = 0;
+        // Index 1, register 3: writing ones to INT1..INT5 acknowledges those flags.
+        interruptFlags &= ~(value & 0x1F);
         if ((value & 0x40) != 0) parameters.clear();
     }
 

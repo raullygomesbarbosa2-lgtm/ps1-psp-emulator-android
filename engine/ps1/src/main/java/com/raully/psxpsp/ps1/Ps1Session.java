@@ -39,7 +39,22 @@ public final class Ps1Session implements AutoCloseable {
         machine.getBus().getCdrom().insertDisc(image);
     }
 
-    /** Load a standalone PS-X EXE for the experimental session. */
+    /** Read SYSTEM.CNF and load its PS-X EXE entry through the experimental HLE shortcut. */
+    public synchronized DiscBootInfo bootDisc() throws IOException {
+        if (state == State.RUNNING || state == State.PAUSED || (worker != null && worker.isAlive())) {
+            throw new IllegalStateException("stop the current session before booting a disc");
+        }
+        if (!machine.getBus().getCdrom().hasDisc()) throw new IllegalStateException("insert a disc before booting");
+        Ps1Iso9660BootLoader.BootExecutable boot = Ps1Iso9660BootLoader.load(machine.getBus().getCdrom().getDiscImage());
+        Ps1ExecutableLoader.ExecutableInfo info = Ps1ExecutableLoader.load(machine, boot.copyImage());
+        executableInfo = info;
+        stopRequested = false;
+        pauseRequested = false;
+        state = State.READY;
+        return new DiscBootInfo(boot.path, info);
+    }
+
+    /** Load a standalone PS-X EXE for the experimental session. */ 
     public synchronized Ps1ExecutableLoader.ExecutableInfo loadExecutable(byte[] file) {
         if (state == State.RUNNING || state == State.PAUSED || (worker != null && worker.isAlive())) {
             throw new IllegalStateException("stop the current session before loading another executable");
@@ -98,6 +113,15 @@ public final class Ps1Session implements AutoCloseable {
             catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
         }
         try { machine.getBus().getCdrom().ejectDisc(); } catch (IOException ignored) { }
+    }
+
+    public static final class DiscBootInfo {
+        public final String executablePath;
+        public final Ps1ExecutableLoader.ExecutableInfo executableInfo;
+        private DiscBootInfo(String executablePath, Ps1ExecutableLoader.ExecutableInfo executableInfo) {
+            this.executablePath = executablePath;
+            this.executableInfo = executableInfo;
+        }
     }
 
     private void runLoop() {

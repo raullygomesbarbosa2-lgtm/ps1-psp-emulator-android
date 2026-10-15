@@ -36,6 +36,7 @@ public final class Ps1Machine {
     public void tickSystemCycles(long cycles) {
         videoTiming.advanceSystemCycles(cycles);
         bus.getCdrom().tickSystemCycles(cycles);
+        bus.getDma().servicePendingTransfers();
     }
     public void tickVideoClock(long pulses) { videoTiming.advanceVideoTicks(pulses); }
     public void tickDotClocks(long pulses) { bus.getTimers().tickDotClocks(pulses); }

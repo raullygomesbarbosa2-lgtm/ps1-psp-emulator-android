@@ -126,6 +126,55 @@ public final class MipsR3000ATest {
     }
 
     @Test
+    public void cop2TransfersRequireCu2AndKeepMfcResultsDelayed() {
+        TestBus bus = new TestBus();
+        bus.put32(START, i(0x10, 4, 1, 12)); // MTC0 r1, Status (enable CU2)
+        bus.put32(START + 4, cop2Transfer(4, 2, 14)); // MTC2 r2, SXY2
+        bus.put32(START + 8, cop2Transfer(0, 3, 14)); // MFC2 r3, SXY2
+        bus.put32(START + 12, cop2Transfer(6, 2, 4)); // CTC2 r2, control 4
+        bus.put32(START + 16, cop2Transfer(2, 4, 4)); // CFC2 r4, control 4
+        bus.put32(START + 20, 0); // NOP, exposes delayed CFC2 result
+        MipsR3000A cpu = new MipsR3000A(bus);
+        cpu.reset(START);
+        cpu.setRegister(1, 1 << 30);
+        cpu.setRegister(2, 0x000A0001);
+
+        for (int i = 0; i < 6; i++) cpu.step();
+
+        assertEquals(0x000A0001, cpu.getRegister(3));
+        assertEquals(0x000A0001, cpu.getRegister(4));
+
+        TestBus disabledBus = new TestBus();
+        disabledBus.put32(START, cop2Transfer(0, 2, 0));
+        MipsR3000A disabledCpu = new MipsR3000A(disabledBus);
+        disabledCpu.reset(START);
+        disabledCpu.step();
+        assertEquals(11, (disabledCpu.getCp0Register(13) >>> 2) & 0x1F);
+    }
+
+    @Test
+    public void nclipCommandRunsThroughCop2AndReturnsMac0() {
+        TestBus bus = new TestBus();
+        bus.put32(START, i(0x10, 4, 1, 12)); // Enable CU2.
+        bus.put32(START + 4, cop2Transfer(4, 2, 12)); // MTC2 r2, SXY0
+        bus.put32(START + 8, cop2Transfer(4, 3, 13)); // MTC2 r3, SXY1
+        bus.put32(START + 12, cop2Transfer(4, 4, 14)); // MTC2 r4, SXY2
+        bus.put32(START + 16, 0x4A000006); // NCLIP
+        bus.put32(START + 20, cop2Transfer(0, 5, 24)); // MFC2 r5, MAC0
+        bus.put32(START + 24, 0); // load-delay slot
+        MipsR3000A cpu = new MipsR3000A(bus);
+        cpu.reset(START);
+        cpu.setRegister(1, 1 << 30);
+        cpu.setRegister(2, 0x00000000); // (0,0)
+        cpu.setRegister(3, 0x0000000A); // (10,0)
+        cpu.setRegister(4, 0x000A0000); // (0,10)
+
+        for (int i = 0; i < 7; i++) cpu.step();
+
+        assertEquals(100, cpu.getRegister(5));
+    }
+
+    @Test
     public void addOverflowRaisesExceptionAndRecordsEpc() {
         TestBus bus = new TestBus();
         bus.put32(START, i(0x08, 1, 2, 1)); // ADDI r2,r1,1
@@ -186,6 +235,10 @@ public final class MipsR3000ATest {
             assertEquals("opcode 0x" + Integer.toHexString(opcode) + ", offset " + offset + ", byte " + i,
                     expectedBytes[i], bus.read8(0x2000 + i));
         }
+    }
+
+    private static int cop2Transfer(int rs, int rt, int rd) {
+        return (0x12 << 26) | (rs << 21) | (rt << 16) | (rd << 11);
     }
 
     private static int i(int opcode, int rs, int rt, int immediate) {

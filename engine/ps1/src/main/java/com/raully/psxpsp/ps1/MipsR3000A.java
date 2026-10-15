@@ -4,7 +4,7 @@ package com.raully.psxpsp.ps1;
  * Primeira etapa do interpretador inteiro MIPS R3000A do PS1.
  * Implementa um subconjunto base da ISA, atraso de desvio, atraso de carga,
  * multiplicação/divisão inteiras e exceções básicas. Não implementa ainda
- * cache, GTE/COP2, temporização do console nem todas as instruções MIPS.
+ * cache, comandos GTE completos, temporização do console nem todas as instruções MIPS.
  */
 public final class MipsR3000A {
     public static final int RESET_VECTOR = 0xBFC00000;
@@ -26,8 +26,10 @@ public final class MipsR3000A {
     private static final int CP0_CAUSE = 13;
     private static final int CP0_EPC = 14;
     private static final int STATUS_BEV = 1 << 22;
+    private static final int STATUS_CU2 = 1 << 30;
 
     private final Ps1Bus bus;
+    private final Ps1Gte gte = new Ps1Gte();
     private final int[] gpr = new int[32];
     private final int[] cp0 = new int[16];
 
@@ -68,6 +70,7 @@ public final class MipsR3000A {
     public void reset(int entryPoint) {
         for (int i = 0; i < gpr.length; i++) gpr[i] = 0;
         for (int i = 0; i < cp0.length; i++) cp0[i] = 0;
+        gte.reset();
         pc = entryPoint;
         hi = 0;
         lo = 0;
@@ -224,7 +227,12 @@ public final class MipsR3000A {
             case 0x0F: writeRegister(rt, unsignedImmediate << 16); return;
             case 0x10: executeCop0(instruction, rs, rt, rd, function); return;
             case 0x11: throw new CpuFault(EXC_COPROCESSOR_UNUSABLE, -1); // PS1 has no COP1.
-            case 0x12: throw new CpuFault(EXC_COPROCESSOR_UNUSABLE, -1); // GTE/COP2 arrives later.
+            case 0x12:
+                if ((cp0[CP0_STATUS] & STATUS_CU2) == 0) {
+                    throw new CpuFault(EXC_COPROCESSOR_UNUSABLE, -1);
+                }
+                executeCop2(instruction, rs, rt, rd, function);
+                return;
             case 0x20: scheduleLoad(rt, sign8(bus.read8(effectiveAddress(rs, immediate)))); return;
             case 0x21: {
                 int address = effectiveAddress(rs, immediate);
@@ -340,6 +348,20 @@ public final class MipsR3000A {
             return;
         }
         throw new CpuFault(EXC_RESERVED_INSTRUCTION, -1);
+    }
+
+    private void executeCop2(int instruction, int rs, int rt, int rd, int function) throws CpuFault {
+        switch (rs) {
+            case 0: scheduleLoad(rt, gte.readData(rd)); return; // MFC2
+            case 2: scheduleLoad(rt, gte.readControl(rd)); return; // CFC2
+            case 4: gte.writeData(rd, readRegister(rt)); return; // MTC2
+            case 6: gte.writeControl(rd, readRegister(rt)); return; // CTC2
+            default:
+                if (rs >= 16) {
+                    if (gte.executeCommand(function)) return;
+                }
+                throw new CpuFault(EXC_RESERVED_INSTRUCTION, -1);
+        }
     }
 
     private int effectiveAddress(int baseRegister, int offset) {

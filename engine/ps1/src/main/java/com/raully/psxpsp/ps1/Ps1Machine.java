@@ -1,8 +1,8 @@
 package com.raully.psxpsp.ps1;
 
 /**
- * Composição mínima: CPU MIPS, barramento, timers, raster e controle GP1 parcial.
- * HLE de BIOS, GP0 e dispositivos de renderização ainda não existem.
+ * Composição mínima: CPU MIPS, barramento, timers, raster e GPU GP0/GP1 parcial.
+ * HLE de BIOS e rasterização de primitivas ainda não existem.
  */
 public final class Ps1Machine {
     private final Ps1MemoryBus bus;

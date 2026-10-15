@@ -40,13 +40,13 @@ validation/
   psp/                      Testes do núcleo PSP quando essa etapa começar
 ```
 
-A estrutura é uma proposta de organização. O módulo `engine/ps1` agora conecta CPU MIPS R3000A parcial a RAM/scratchpad, controle, interrupções, timers e raster NTSC/PAL; um subconjunto GP1 configura modo e faixas de exibição, que alimentam HBlank/VBlank. GP0, renderização e escalonamento automático por instrução ainda estão ausentes; não existe APK jogável.
+A estrutura é uma proposta de organização. O módulo `engine/ps1` conecta CPU MIPS R3000A parcial a RAM/scratchpad, interrupções, timers, raster e GPU parcial: GP1 controla as faixas; GP0 implementa algumas operações de VRAM 1024×512, mas ainda não rasteriza primitivas nem gera imagem. O escalonamento automático por instrução também falta; não existe APK jogável.
 
 ## Sequência de desenvolvimento
 
 1. **Fundação Android:** projeto nativo, telas iniciais e navegação entre as bibliotecas PS1 e PSP.
 2. **Catálogo local:** importar jogos escolhidos pelo usuário por seletor de arquivos do Android; manter listas separadas, sem baixar ou fornecer jogos.
-3. **Base verificável do PS1:** implementados parcialmente CPU, RAM/scratchpad, controle, interrupções, timers e GP1 de vídeo; a suíte unitária passou no GitHub Actions (run [#38647232417](https://github.com/raullygomesbarbosa2-lgtm/ps1-psp-emulator-android/actions/runs/38647232417), commit `903055a`). Próximo: validar os registradores e implementar GP0/VRAM.
+3. **Base verificável do PS1:** CPU, RAM/scratchpad, controle, IRQs, timers, GP1 e primeiras operações GP0/VRAM têm testes unitários; a etapa GP0/VRAM aguarda resultado do CI. Próximo: validar primitivas e renderização.
 4. **HLE e dispositivos:** inicialização HLE, DMA, controles e leitura de disco; integrar eventos reais de vídeo aos timers e registrar claramente o que ainda não é compatível.
 5. **Imagem e áudio:** GPU e SPU próprios; primeiro objetivo é executar conteúdo de teste simples e documentado, não prometer compatibilidade universal.
 6. **Teste em aparelhos:** validar desempenho, estabilidade e compatibilidade em Android antigo e recente; corrigir antes de chamar qualquer build de jogável.
@@ -64,5 +64,5 @@ A estrutura é uma proposta de organização. O módulo `engine/ps1` agora conec
 
 - A primeira meta é uma base de PS1 testável; um emulador completo exige implementar corretamente CPU, vídeo, áudio, CD-ROM e temporização, não apenas criar telas.
 - HLE pode substituir serviços comuns de BIOS, mas não é garantia de que todo jogo funcione sem a BIOS original.
-- `Ps1Machine.tickSystemCycles` avança timers e raster; GP1(06h/07h/08h) seleciona faixa horizontal/vertical e região. O vínculo é parcial, o custo de ciclo por instrução ainda não é automático, e GPU GP0/renderização, a maioria do MMIO, interface integrada, APK jogável e teste em aparelho ainda faltam.
+- `Ps1Machine.tickSystemCycles` avança timers e raster; GP1(06h/07h/08h) configura região e faixas. GP0 já preenche/copia VRAM e transfere pixels A0h/C0h, mas não desenha polígonos/linhas/texturas; a temporização, FIFO/DMA, renderização, a maioria do MMIO, interface integrada, APK jogável e teste em aparelho ainda faltam.
 - Antes de qualquer distribuição, validar requisitos legais aplicáveis a marcas, formatos de arquivo e distribuição do aplicativo. O app não deve fornecer firmware protegido ou jogos.

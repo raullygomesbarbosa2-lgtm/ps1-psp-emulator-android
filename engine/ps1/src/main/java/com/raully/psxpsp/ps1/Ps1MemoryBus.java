@@ -5,7 +5,7 @@ import java.util.Arrays;
 /**
  * Initial PS1 address bus: mirrored 2 MiB RAM, 1 KiB scratchpad, selected
  * memory-control registers, interrupt controller, video timing, and partial
- * GP1 display control. Other MMIO, ROM and expansion regions fault explicitly.
+ * GP0/GP1 GPU ports. Other MMIO, ROM and expansion regions fault explicitly.
  */
 public final class Ps1MemoryBus implements Ps1Bus {
     public static final int RAM_SIZE = 2 * 1024 * 1024;
@@ -22,7 +22,7 @@ public final class Ps1MemoryBus implements Ps1Bus {
     private final Ps1MemoryControl memoryControl = new Ps1MemoryControl();
     private final Ps1Timers timers = new Ps1Timers(interruptController);
     private final Ps1VideoTiming videoTiming = new Ps1VideoTiming(timers);
-    private final Ps1Gpu gpu = new Ps1Gpu(videoTiming);
+    private final Ps1Gpu gpu = new Ps1Gpu(videoTiming, interruptController);
 
     public Ps1InterruptController getInterruptController() { return interruptController; }
     public Ps1MemoryControl getMemoryControl() { return memoryControl; }
@@ -41,6 +41,9 @@ public final class Ps1MemoryBus implements Ps1Bus {
         if (timers.isMappedAddress(physicalAddress)) {
             int word = timers.readRegister(physicalAddress & ~3);
             return (word >>> ((physicalAddress & 3) * 8)) & 0xFF;
+        }
+        if (isGpuDataRegister(physicalAddress)) {
+            return gpu.readDataByte(physicalAddress - Ps1Gpu.DATA_PORT);
         }
         if (isGpuControlRegister(physicalAddress)) {
             return (gpu.readStatus() >>> ((physicalAddress - GPU_CONTROL) * 8)) & 0xFF;
@@ -79,6 +82,10 @@ public final class Ps1MemoryBus implements Ps1Bus {
             if ((mask & 0xFFFF) != 0) timers.writeRegister(physicalAddress & ~3, (value & 0xFF) << shift, mask);
             return;
         }
+        if (isGpuDataRegister(physicalAddress)) {
+            gpu.writeDataByte(physicalAddress - Ps1Gpu.DATA_PORT, value);
+            return;
+        }
         if (isGpuControlRegister(physicalAddress)) {
             gpu.writeControlByte(physicalAddress - GPU_CONTROL, value);
             return;
@@ -111,6 +118,10 @@ public final class Ps1MemoryBus implements Ps1Bus {
     @Override
     public void write32(int address, int value) {
         int physicalAddress = toPhysicalAddress(address, true);
+        if (physicalAddress == Ps1Gpu.DATA_PORT) {
+            gpu.writeDataWord(value);
+            return;
+        }
         if (physicalAddress == GPU_CONTROL) {
             gpu.writeControlWord(value);
             return;
@@ -130,7 +141,7 @@ public final class Ps1MemoryBus implements Ps1Bus {
         interruptController.reset();
         memoryControl.resetToCommonBiosValues();
         timers.reset();
-        gpu.reset();
+        gpu.clear();
     }
 
     /** Load bytes into physical main RAM; validates the complete destination range. */
@@ -145,6 +156,10 @@ public final class Ps1MemoryBus implements Ps1Bus {
 
     public byte[] copyRam() {
         return ram.clone();
+    }
+
+    private boolean isGpuDataRegister(int physicalAddress) {
+        return physicalAddress >= Ps1Gpu.DATA_PORT && physicalAddress < Ps1Gpu.DATA_PORT + 4;
     }
 
     private boolean isGpuControlRegister(int physicalAddress) {

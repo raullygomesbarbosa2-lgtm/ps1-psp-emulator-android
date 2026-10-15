@@ -71,6 +71,8 @@ public class Ps1CdromControllerTest {
         bus.write8(Ps1MemoryBus.CDROM_BASE, 0);
         bus.write8(Ps1MemoryBus.CDROM_BASE + 1, 0x06); // ReadN continues at the next LBA.
         acknowledgeCurrentResponse(bus, 3);
+        bus.write8(Ps1MemoryBus.CDROM_BASE, 0);
+        bus.write8(Ps1MemoryBus.CDROM_BASE + 3, 0x80); // Re-enable BFRD for the next sector.
         machine.tickSystemCycles(Ps1CdromController.SINGLE_SPEED_SECTOR_CYCLES);
         acknowledgeCurrentResponse(bus, 1);
         bus.write8(Ps1MemoryBus.CDROM_BASE, 0);

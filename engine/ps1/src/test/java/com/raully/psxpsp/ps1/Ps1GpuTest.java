@@ -101,7 +101,7 @@ public final class Ps1GpuTest {
         assertEquals(0x22221111, bus.read32(Ps1Gpu.DATA_PORT));
         assertEquals(0x00003333, bus.read32(Ps1Gpu.DATA_PORT));
         assertFalse(gpu.hasReadbackData());
-        assertEquals(0, bus.readVramPixel(6, 2));
+        assertEquals(0, gpu.readVramPixel(6, 2));
     }
 
     @Test

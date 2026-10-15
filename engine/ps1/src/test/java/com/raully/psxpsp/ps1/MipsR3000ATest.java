@@ -128,7 +128,7 @@ public final class MipsR3000ATest {
     @Test
     public void cop2TransfersRequireCu2AndKeepMfcResultsDelayed() {
         TestBus bus = new TestBus();
-        bus.put32(START, i(0x10, 4, 1, 12)); // MTC0 r1, Status (enable CU2)
+        bus.put32(START, cop0Transfer(4, 1, 12)); // MTC0 r1, Status (enable CU2)
         bus.put32(START + 4, cop2Transfer(4, 2, 14)); // MTC2 r2, SXY2
         bus.put32(START + 8, cop2Transfer(0, 3, 14)); // MFC2 r3, SXY2
         bus.put32(START + 12, cop2Transfer(6, 2, 4)); // CTC2 r2, control 4
@@ -155,7 +155,7 @@ public final class MipsR3000ATest {
     @Test
     public void nclipCommandRunsThroughCop2AndReturnsMac0() {
         TestBus bus = new TestBus();
-        bus.put32(START, i(0x10, 4, 1, 12)); // Enable CU2.
+        bus.put32(START, cop0Transfer(4, 1, 12)); // Enable CU2.
         bus.put32(START + 4, cop2Transfer(4, 2, 12)); // MTC2 r2, SXY0
         bus.put32(START + 8, cop2Transfer(4, 3, 13)); // MTC2 r3, SXY1
         bus.put32(START + 12, cop2Transfer(4, 4, 14)); // MTC2 r4, SXY2
@@ -235,6 +235,10 @@ public final class MipsR3000ATest {
             assertEquals("opcode 0x" + Integer.toHexString(opcode) + ", offset " + offset + ", byte " + i,
                     expectedBytes[i], bus.read8(0x2000 + i));
         }
+    }
+
+    private static int cop0Transfer(int rs, int rt, int rd) {
+        return (0x10 << 26) | (rs << 21) | (rt << 16) | (rd << 11);
     }
 
     private static int cop2Transfer(int rs, int rt, int rd) {

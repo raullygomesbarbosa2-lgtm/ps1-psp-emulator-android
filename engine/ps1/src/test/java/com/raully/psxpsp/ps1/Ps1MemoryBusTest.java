@@ -34,10 +34,10 @@ public final class Ps1MemoryBusTest {
     public void unimplementedHardwareAddressReportsExplicitBusFault() {
         Ps1MemoryBus bus = new Ps1MemoryBus();
         try {
-            bus.read32(0x1F801018); // unmapped hardware register
+            bus.read32(0x1F801820); // unmapped hardware register
             fail("expected an explicit bus fault");
         } catch (Ps1Bus.BusFaultException fault) {
-            assertEquals(0x1F801018, fault.getAddress());
+            assertEquals(0x1F801820, fault.getAddress());
             assertEquals(false, fault.isWrite());
         }
     }
@@ -64,7 +64,7 @@ public final class Ps1MemoryBusTest {
         Ps1Machine machine = new Ps1Machine();
         machine.getBus().write32(0, i(0x23, 1, 2, 0)); // LW r2,0(r1)
         machine.startAt(0x80000000);
-        machine.getCpu().setRegister(1, 0x1F801018);
+        machine.getCpu().setRegister(1, 0x1F801820);
 
         machine.step();
 
@@ -77,7 +77,7 @@ public final class Ps1MemoryBusTest {
         Ps1Machine machine = new Ps1Machine();
         machine.getBus().write32(0, i(0x2B, 1, 2, 0)); // SW r2,0(r1)
         machine.startAt(0x80000000);
-        machine.getCpu().setRegister(1, 0x1F801018);
+        machine.getCpu().setRegister(1, 0x1F801820);
 
         machine.step();
 

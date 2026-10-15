@@ -14,14 +14,30 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 
+import com.raully.psxpsp.ps1.Ps1ExecutableLoader;
 import com.raully.psxpsp.ps1.Ps1Gpu;
 import com.raully.psxpsp.ps1.Ps1Machine;
+import com.raully.psxpsp.ps1.Ps1Session;
 
-/** Tela inicial nativa; importa e identifica arquivos, mas ainda não roda jogos. */
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+
+/** Tela inicial nativa com prévia GPU e execução experimental de PS-X EXE, sem suporte a jogos de disco. */
 public final class MainActivity extends Activity {
     private TextView ps1Selection;
     private TextView pspSelection;
     private int pendingSystem = 0;
+    private Uri selectedPs1Uri;
+    private boolean selectedPs1Executable;
+    private Ps1VideoFrameView ps1VideoView;
+    private TextView ps1RunStatus;
+    private Button ps1StartButton;
+    private Button ps1PauseButton;
+    private Button ps1StopButton;
+    private Button diagnosticButton;
+    private Ps1Session ps1Session;
+    private boolean activityResumed;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -53,7 +69,7 @@ public final class MainActivity extends Activity {
         ps1Selection = addLibraryCard(root, "PLAYSTATION 1", "Núcleo parcial — ainda não inicia jogos", 1);
         pspSelection = addLibraryCard(root, "PLAYSTATION PORTABLE", "Núcleo próprio — etapa futura, ainda não implementado", 2);
 
-        TextView note = text("Selecionar um arquivo não inicia o jogo. Esta versão ainda não tem um fluxo de emulação.", 13, Color.LTGRAY, false);
+        TextView note = text("Selecionar um arquivo não inicia a sessão automaticamente. Só PS-X EXE pode ser iniciado em modo experimental; jogos BIN/CUE/ISO ainda não rodam.", 13, Color.LTGRAY, false);
         LinearLayout.LayoutParams noteParams = new LinearLayout.LayoutParams(-1, -2);
         noteParams.topMargin = dp(4);
         root.addView(note, noteParams);
@@ -106,17 +122,43 @@ public final class MainActivity extends Activity {
         explanationParams.topMargin = dp(5);
         root.addView(explanation, explanationParams);
 
-        Ps1VideoFrameView videoView = new Ps1VideoFrameView(this);
+        ps1VideoView = new Ps1VideoFrameView(this);
         LinearLayout.LayoutParams videoParams = new LinearLayout.LayoutParams(-1, dp(220));
         videoParams.topMargin = dp(10);
         videoParams.bottomMargin = dp(4);
-        root.addView(videoView, videoParams);
+        root.addView(ps1VideoView, videoParams);
 
-        Button testFrame = new Button(this);
-        testFrame.setText("Gerar prévia técnica");
-        testFrame.setAllCaps(false);
-        testFrame.setOnClickListener(v -> renderDiagnosticFrame(videoView));
-        root.addView(testFrame, new LinearLayout.LayoutParams(-1, -2));
+        ps1RunStatus = text("Selecione um executável PS-X EXE para iniciar uma sessão experimental.", 13, Color.LTGRAY, false);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
+        statusParams.topMargin = dp(8);
+        root.addView(ps1RunStatus, statusParams);
+
+        ps1StartButton = new Button(this);
+        ps1StartButton.setText("Iniciar sessão PS-X EXE (teste)");
+        ps1StartButton.setAllCaps(false);
+        ps1StartButton.setEnabled(false);
+        ps1StartButton.setOnClickListener(v -> startStandaloneExeSession());
+        root.addView(ps1StartButton, new LinearLayout.LayoutParams(-1, -2));
+
+        ps1PauseButton = new Button(this);
+        ps1PauseButton.setText("Pausar sessão");
+        ps1PauseButton.setAllCaps(false);
+        ps1PauseButton.setEnabled(false);
+        ps1PauseButton.setOnClickListener(v -> togglePs1Pause());
+        root.addView(ps1PauseButton, new LinearLayout.LayoutParams(-1, -2));
+
+        ps1StopButton = new Button(this);
+        ps1StopButton.setText("Encerrar sessão");
+        ps1StopButton.setAllCaps(false);
+        ps1StopButton.setEnabled(false);
+        ps1StopButton.setOnClickListener(v -> stopPs1Session());
+        root.addView(ps1StopButton, new LinearLayout.LayoutParams(-1, -2));
+
+        diagnosticButton = new Button(this);
+        diagnosticButton.setText("Gerar prévia técnica");
+        diagnosticButton.setAllCaps(false);
+        diagnosticButton.setOnClickListener(v -> renderDiagnosticFrame(ps1VideoView));
+        root.addView(diagnosticButton, new LinearLayout.LayoutParams(-1, -2));
     }
 
     private void renderDiagnosticFrame(Ps1VideoFrameView videoView) {
@@ -160,6 +202,168 @@ public final class MainActivity extends Activity {
         String label = "Arquivo selecionado: " + uri.getLastPathSegment();
         TextView destination = (requestCode == 101) ? ps1Selection : (requestCode == 102 ? pspSelection : null);
         if (destination != null) destination.setText(label);
+        if (requestCode == 101) {
+            if (ps1Session != null) stopPs1Session();
+            selectedPs1Uri = uri;
+            inspectSelectedPs1File(uri);
+        }
+    }
+
+    private void inspectSelectedPs1File(Uri uri) {
+        selectedPs1Executable = false;
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input != null) {
+                byte[] magic = new byte[8];
+                int count = 0;
+                while (count < magic.length) {
+                    int read = input.read(magic, count, magic.length - count);
+                    if (read < 0) break;
+                    count += read;
+                }
+                byte[] expected = {'P', 'S', '-', 'X', ' ', 'E', 'X', 'E'};
+                selectedPs1Executable = count == expected.length;
+                for (int i = 0; selectedPs1Executable && i < expected.length; i++) {
+                    selectedPs1Executable = magic[i] == expected[i];
+                }
+            }
+        } catch (IOException | SecurityException ignored) { }
+        ps1StartButton.setEnabled(selectedPs1Executable);
+        ps1RunStatus.setText(selectedPs1Executable
+                ? "Executável PS-X EXE detectado. Início experimental, sem BIOS e sem serviços HLE completos."
+                : "Arquivo selecionado. Esta etapa aceita apenas PS-X EXE; imagens BIN/CUE/ISO ainda não iniciam.");
+    }
+
+    private void startStandaloneExeSession() {
+        final Uri uri = selectedPs1Uri;
+        if (uri == null || !selectedPs1Executable || ps1StartButton == null) return;
+        ps1StartButton.setEnabled(false);
+        ps1RunStatus.setText("Carregando executável PS-X EXE...");
+        Thread loader = new Thread(() -> {
+            Ps1Session candidate = new Ps1Session();
+            try {
+                byte[] executable = readSelectedFile(uri);
+                Ps1ExecutableLoader.ExecutableInfo info = candidate.loadExecutable(executable);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || !uri.equals(selectedPs1Uri)) {
+                        candidate.close();
+                        return;
+                    }
+                    if (!activityResumed) {
+                        candidate.close();
+                        ps1StartButton.setEnabled(selectedPs1Executable);
+                        ps1RunStatus.setText("A tela foi pausada durante o carregamento. Toque para tentar novamente.");
+                        return;
+                    }
+                    stopPs1Session();
+                    ps1Session = candidate;
+                    ps1VideoView.clearFrame();
+                    try {
+                        candidate.start(frame -> {
+                            if (ps1Session == candidate && !isFinishing() && !isDestroyed()) {
+                                ps1VideoView.present(frame);
+                            }
+                        });
+                        ps1StartButton.setEnabled(false);
+                        ps1PauseButton.setText("Pausar sessão");
+                        ps1PauseButton.setEnabled(true);
+                        ps1StopButton.setEnabled(true);
+                        diagnosticButton.setEnabled(false);
+                        ps1RunStatus.setText(String.format("Sessão experimental ativa — PC 0x%08X, %d bytes. Sem HLE completo; pode não executar este programa.", info.entryPoint, info.textSize));
+                    } catch (IllegalStateException startFailure) {
+                        ps1Session = null;
+                        candidate.close();
+                        ps1StartButton.setEnabled(true);
+                        ps1RunStatus.setText("Não foi possível iniciar este executável experimental.");
+                    }
+                });
+            } catch (IOException | IllegalArgumentException | SecurityException failure) {
+                candidate.close();
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || !uri.equals(selectedPs1Uri)) return;
+                    ps1StartButton.setEnabled(selectedPs1Executable);
+                    ps1RunStatus.setText("Não foi possível carregar o PS-X EXE. Confira o arquivo e tente novamente.");
+                });
+            }
+        }, "ps1-exe-loader");
+        loader.setDaemon(true);
+        loader.start();
+    }
+
+    private byte[] readSelectedFile(Uri uri) throws IOException {
+        try (InputStream input = getContentResolver().openInputStream(uri);
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            if (input == null) throw new IOException("file unavailable");
+            byte[] buffer = new byte[8192];
+            int total = 0;
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                if (count == 0) continue;
+                if (count > Ps1ExecutableLoader.MAX_FILE_SIZE - total) {
+                    throw new IOException("file exceeds supported PS-X EXE size");
+                }
+                output.write(buffer, 0, count);
+                total += count;
+            }
+            return output.toByteArray();
+        }
+    }
+
+    private void stopPs1Session() {
+        if (ps1Session != null) {
+            ps1Session.stop();
+            ps1Session = null;
+        }
+        if (ps1PauseButton != null) {
+            ps1PauseButton.setEnabled(false);
+            ps1PauseButton.setText("Pausar sessão");
+        }
+        if (ps1StopButton != null) ps1StopButton.setEnabled(false);
+        if (diagnosticButton != null) diagnosticButton.setEnabled(true);
+        if (ps1StartButton != null) ps1StartButton.setEnabled(selectedPs1Executable);
+        if (ps1RunStatus != null) ps1RunStatus.setText("Sessão encerrada.");
+    }
+
+    private void togglePs1Pause() {
+        if (ps1Session == null) return;
+        if (ps1Session.getState() == Ps1Session.State.RUNNING) {
+            ps1Session.pause();
+            ps1PauseButton.setText("Retomar sessão");
+            ps1RunStatus.setText("Sessão pausada.");
+        } else if (ps1Session.getState() == Ps1Session.State.PAUSED) {
+            ps1Session.resume();
+            ps1PauseButton.setText("Pausar sessão");
+            ps1RunStatus.setText("Sessão experimental ativa.");
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        activityResumed = false;
+        if (ps1Session != null && ps1Session.getState() == Ps1Session.State.RUNNING) {
+            ps1Session.pause();
+            if (ps1PauseButton != null) ps1PauseButton.setText("Retomar sessão");
+        }
+        super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        activityResumed = true;
+        if (ps1Session != null && ps1Session.getState() == Ps1Session.State.PAUSED) {
+            ps1Session.resume();
+            if (ps1PauseButton != null) ps1PauseButton.setText("Pausar sessão");
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (ps1Session != null) {
+            Ps1Session ending = ps1Session;
+            ps1Session = null;
+            ending.stop();
+        }
+        super.onDestroy();
     }
 
     private TextView text(String value, int size, int color, boolean bold) {

@@ -46,6 +46,16 @@ public final class Ps1VideoFrameView extends View {
         invalidate();
     }
 
+    public void clearFrame() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            post(this::clearFrame);
+            return;
+        }
+        if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+        bitmap = null;
+        invalidate();
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);

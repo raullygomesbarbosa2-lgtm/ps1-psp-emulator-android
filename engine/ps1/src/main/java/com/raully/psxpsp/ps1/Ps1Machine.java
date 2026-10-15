@@ -2,7 +2,7 @@ package com.raully.psxpsp.ps1;
 
 /**
  * Composição mínima: CPU MIPS, barramento, timers, raster e GPU GP0/GP1 parcial.
- * A GPU rasteriza um subconjunto de primitivas e expõe snapshots ARGB; HLE e apresentação Android ainda faltam.
+ * Há um carregador PS-X EXE e apresentação de snapshots, mas sem HLE completo ou precisão de ciclo.
  */
 public final class Ps1Machine {
     private final Ps1MemoryBus bus;
@@ -30,10 +30,7 @@ public final class Ps1Machine {
         cpu.step();
     }
 
-    /**
-     * Advance the supplied system cycles through the provisional video clock
-     * and timers. CPU instructions still need an external cycle scheduler.
-     */
+    /** Advance supplied system cycles through the provisional video clock and timers. */
     public void tickSystemCycles(long cycles) { videoTiming.advanceSystemCycles(cycles); }
     public void tickVideoClock(long pulses) { videoTiming.advanceVideoTicks(pulses); }
     public void tickDotClocks(long pulses) { bus.getTimers().tickDotClocks(pulses); }

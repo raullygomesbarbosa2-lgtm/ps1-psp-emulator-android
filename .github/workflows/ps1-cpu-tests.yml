@@ -29,6 +29,10 @@ jobs:
         run: gradle :engine:ps1:test
       - name: Compile native Android app
         run: gradle :app:assembleDebug
+      - name: Report debug APK size and checksum
+        run: |
+          stat --format='APK size: %s bytes' app/build/outputs/apk/debug/app-debug.apk
+          sha256sum app/build/outputs/apk/debug/app-debug.apk
       - name: Save debug APK for testing
         uses: actions/upload-artifact@v4
         with:

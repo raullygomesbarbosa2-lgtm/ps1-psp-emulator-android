@@ -1,4 +1,4 @@
-name: PS1 CPU unit tests
+name: PS1 engine tests and Android build
 
 on:
   push:

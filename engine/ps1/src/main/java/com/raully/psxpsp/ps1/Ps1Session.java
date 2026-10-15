@@ -29,7 +29,7 @@ public final class Ps1Session implements AutoCloseable {
     public State getState() { return state; }
     public Ps1ExecutableLoader.ExecutableInfo getExecutableInfo() { return executableInfo; }
 
-    /** Load a standalone PS-X EXE. This does not accept disc images or provide BIOS services. */
+    /** Load a standalone PS-X EXE. Disc images and most BIOS services are not supported. */
     public synchronized Ps1ExecutableLoader.ExecutableInfo loadExecutable(byte[] file) {
         if (state == State.RUNNING || state == State.PAUSED || (worker != null && worker.isAlive())) {
             throw new IllegalStateException("stop the current session before loading another executable");

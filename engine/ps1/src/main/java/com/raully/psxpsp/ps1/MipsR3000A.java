@@ -83,6 +83,19 @@ public final class MipsR3000A {
         return index == 0 ? 0 : gpr[index];
     }
 
+    /** Complete a trapped HLE call and return to the caller's link register. */
+    public void returnFromHleCall(int returnValue) {
+        if (pendingLoadRegister > 0) gpr[pendingLoadRegister] = pendingLoadValue;
+        pendingLoadRegister = -1;
+        pendingLoadValue = 0;
+        pc = gpr[31];
+        branchPending = false;
+        branchTarget = 0;
+        branchInstructionPc = 0;
+        gpr[2] = returnValue;
+        gpr[0] = 0;
+    }
+
     /** Used by the platform boot code and deterministic CPU tests. */
     public void setRegister(int index, int value) {
         checkRegisterIndex(index);

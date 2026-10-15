@@ -40,13 +40,13 @@ validation/
   psp/                      Testes do núcleo PSP quando essa etapa começar
 ```
 
-A estrutura é uma proposta de organização. `engine/ps1` conecta CPU MIPS R3000A parcial, RAM/scratchpad, interrupções, timers e GPU parcial. Um carregador de PS-X EXE pode iniciar uma sessão experimental; o scheduler provisório avança um ciclo de sistema por instrução e emite snapshots quando o raster completa um quadro. `Ps1VideoFrameView` os apresenta em Canvas nativo. Isso não oferece suporte a jogos de disco, HLE completo ou compatibilidade de jogos.
+A estrutura é uma proposta de organização. `engine/ps1` conecta CPU MIPS R3000A parcial, RAM/scratchpad, interrupções, timers e GPU parcial. Um carregador PS-X EXE inicia uma sessão experimental; o scheduler provisório avança um ciclo de sistema por instrução e emite snapshots ao completar quadros. `Ps1VideoFrameView` os apresenta em Canvas nativo. O HLE atende apenas a alguns serviços B0 de eventos/timers e C0 InitRCnt; sem A0/arquivos, HLE completo, jogos de disco ou compatibilidade de jogos.
 
 ## Sequência de desenvolvimento
 
 1. **Fundação Android:** projeto nativo, telas iniciais e navegação entre as bibliotecas PS1 e PSP.
 2. **Catálogo local:** importar jogos escolhidos pelo usuário por seletor de arquivos do Android; manter listas separadas, sem baixar ou fornecer jogos.
-3. **Base verificável do PS1:** CPU, memória, IRQs, timers, GP1, transferências GP0/VRAM, primitivas, carregamento PS-X EXE e entrega de quadros de sessão têm testes unitários. Próximo: completar temporização, HLE e dispositivos necessários antes de ampliar a compatibilidade.
+3. **Base verificável do PS1:** CPU, memória, IRQs, timers, GP1, transferências GP0/VRAM, primitivas, carregamento PS-X EXE, quadros de sessão e eventos BIOS parciais têm testes unitários. Próximo: ampliar HLE, temporização e dispositivos antes de aumentar a compatibilidade.
 4. **HLE e dispositivos:** inicialização HLE, DMA, controles e leitura de disco; integrar eventos reais de vídeo aos timers e registrar claramente o que ainda não é compatível.
 5. **Imagem e áudio:** GPU e SPU próprios; primeiro objetivo é executar conteúdo de teste simples e documentado, não prometer compatibilidade universal.
 6. **Teste em aparelhos:** validar desempenho, estabilidade e compatibilidade em Android antigo e recente; corrigir antes de chamar qualquer build de jogável.
@@ -64,5 +64,5 @@ A estrutura é uma proposta de organização. `engine/ps1` conecta CPU MIPS R300
 
 - A primeira meta é uma base de PS1 testável; um emulador completo exige implementar corretamente CPU, vídeo, áudio, CD-ROM e temporização, não apenas criar telas.
 - HLE pode substituir serviços comuns de BIOS, mas não é garantia de que todo jogo funcione sem a BIOS original.
-- `Ps1Machine.tickSystemCycles` avança timers e raster; GP1 define região/faixas. GP0 preenche/copia/transfere VRAM e rasteriza primitivas opacas sem textura; `renderDisplayFrame()` produz snapshots ARGB exibidos pela View Android. A tela pode receber quadros da sessão experimental de PS-X EXE, mas o clock é aproximado e não há HLE completo, CD-ROM, texturas, semitransparência, FIFO/DMA, APK jogável nem teste em aparelho.
+- `Ps1Machine.tickSystemCycles` avança timers e raster; GP1 define região/faixas. GP0 preenche/copia/transfere VRAM e rasteriza primitivas opacas sem textura; `renderDisplayFrame()` produz snapshots ARGB exibidos pela View Android. A tela pode receber quadros da sessão experimental PS-X EXE. O clock é aproximado; o HLE é parcial, sem CD-ROM, A0/arquivos, callbacks BIOS, texturas, semitransparência, FIFO/DMA, APK jogável ou teste em aparelho.
 - Antes de qualquer distribuição, validar requisitos legais aplicáveis a marcas, formatos de arquivo e distribuição do aplicativo. O app não deve fornecer firmware protegido ou jogos.

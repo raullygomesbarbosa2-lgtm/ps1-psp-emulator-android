@@ -2,12 +2,13 @@ package com.raully.psxpsp.ps1;
 
 /**
  * Composição mínima: CPU MIPS, barramento, timers, raster e GPU GP0/GP1 parcial.
- * Há um carregador PS-X EXE e apresentação de snapshots, mas sem HLE completo ou precisão de ciclo.
+ * Há um carregador PS-X EXE e HLE parcial de eventos BIOS; o relógio ainda não é preciso.
  */
 public final class Ps1Machine {
     private final Ps1MemoryBus bus;
     private final MipsR3000A cpu;
     private final Ps1VideoTiming videoTiming;
+    private final Ps1BiosHle biosHle = new Ps1BiosHle();
 
     public Ps1Machine() {
         bus = new Ps1MemoryBus();
@@ -24,10 +25,11 @@ public final class Ps1Machine {
     /** Start execution at an explicitly prepared entry point; no BIOS is synthesized. */
     public void startAt(int entryPoint) {
         cpu.reset(entryPoint);
+        biosHle.reset();
     }
 
     public void step() {
-        cpu.step();
+        if (!biosHle.dispatch(this)) cpu.step();
     }
 
     /** Advance supplied system cycles through the provisional video clock and timers. */

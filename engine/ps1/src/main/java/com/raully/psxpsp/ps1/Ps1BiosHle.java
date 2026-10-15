@@ -5,7 +5,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.TreeMap;
 
-/** Small software BIOS dispatcher with limited memory, event, and timer services. */
+/** Small software BIOS dispatcher with selected A0 library and B0 event/timer services. */
 final class Ps1BiosHle {
     private static final int VECTOR_A0 = 0xA0;
     private static final int VECTOR_B0 = 0xB0;
@@ -51,6 +51,30 @@ final class Ps1BiosHle {
     private int dispatchA0(Ps1Machine machine, int function) {
         MipsR3000A cpu = machine.getCpu();
         switch (function) {
+            case 0x15: // strcat(dst, src)
+                return concatenateStrings(machine, cpu.getRegister(4), cpu.getRegister(5), Ps1MemoryBus.RAM_SIZE);
+            case 0x16: // strncat(dst, src, maxLength)
+                return concatenateStrings(machine, cpu.getRegister(4), cpu.getRegister(5), cpu.getRegister(6));
+            case 0x17: // strcmp(str1, str2)
+                return compareStrings(machine, cpu.getRegister(4), cpu.getRegister(5), Ps1MemoryBus.RAM_SIZE, true);
+            case 0x18: // strncmp(str1, str2, maxLength)
+                return compareStrings(machine, cpu.getRegister(4), cpu.getRegister(5), cpu.getRegister(6), false);
+            case 0x19: // strcpy(dst, src)
+                return copyString(machine, cpu.getRegister(4), cpu.getRegister(5));
+            case 0x1A: // strncpy(dst, src, maxLength)
+                return copyStringBounded(machine, cpu.getRegister(4), cpu.getRegister(5), cpu.getRegister(6));
+            case 0x1B: // strlen(src)
+                return stringLength(machine, cpu.getRegister(4));
+            case 0x1C: // index(src, character)
+            case 0x1E: // strchr(src, character)
+                return findStringCharacter(machine, cpu.getRegister(4), cpu.getRegister(5), false);
+            case 0x1D: // rindex(src, character)
+            case 0x1F: // strrchr(src, character)
+                return findStringCharacter(machine, cpu.getRegister(4), cpu.getRegister(5), true);
+            case 0x25: // toupper(character)
+                return asciiCase(cpu.getRegister(4), true);
+            case 0x26: // tolower(character)
+                return asciiCase(cpu.getRegister(4), false);
             case 0x27: { // bcopy(src, dst, length)
                 int destination = copyBytes(machine, cpu.getRegister(4), cpu.getRegister(5), cpu.getRegister(6), true);
                 return destination == -1 ? -1 : 0;
@@ -81,7 +105,7 @@ final class Ps1BiosHle {
             case 0x39: // InitHeap(address, size)
                 return initializeHeap(cpu.getRegister(4), cpu.getRegister(5));
             default:
-                return -1; // File/stdio, string, and other A0 calls are not implemented.
+                return -1; // File/stdio, stateful string, and other A0 calls are not implemented.
         }
     }
 
@@ -128,6 +152,85 @@ final class Ps1BiosHle {
 
     private static boolean validMemoryOperationLength(int length) {
         return length >= 0 && length <= Ps1MemoryBus.RAM_SIZE;
+    }
+
+    private int concatenateStrings(Ps1Machine machine, int destination, int source, int maxSourceLength) {
+        if (maxSourceLength < 0 || maxSourceLength > Ps1MemoryBus.RAM_SIZE) return -1;
+        int destinationLength = stringLength(machine, destination);
+        if (destinationLength < 0) return -1;
+        int sourceLength = 0;
+        Ps1MemoryBus bus = machine.getBus();
+        while (sourceLength < maxSourceLength && bus.read8(source + sourceLength) != 0) sourceLength++;
+        long totalLength = (long) destinationLength + sourceLength + 1L;
+        if (totalLength > Ps1MemoryBus.RAM_SIZE) return -1;
+        for (int i = 0; i < sourceLength; i++) {
+            bus.write8(destination + destinationLength + i, bus.read8(source + i));
+        }
+        bus.write8(destination + destinationLength + sourceLength, 0);
+        return destination;
+    }
+
+    private int compareStrings(Ps1Machine machine, int first, int second, int maxLength, boolean requireTerminator) {
+        if (maxLength < 0 || maxLength > Ps1MemoryBus.RAM_SIZE) return -1;
+        Ps1MemoryBus bus = machine.getBus();
+        for (int i = 0; i < maxLength; i++) {
+            int a = bus.read8(first + i);
+            int b = bus.read8(second + i);
+            int difference = a - b;
+            if (difference != 0) return difference;
+            if (a == 0) return 0;
+        }
+        return requireTerminator ? -1 : 0;
+    }
+
+    private int copyString(Ps1Machine machine, int destination, int source) {
+        int length = stringLength(machine, source);
+        if (length < 0 || length >= Ps1MemoryBus.RAM_SIZE) return -1;
+        copyBytes(machine, source, destination, length + 1, false);
+        return destination;
+    }
+
+    private int copyStringBounded(Ps1Machine machine, int destination, int source, int maxLength) {
+        if (maxLength < 0 || maxLength > Ps1MemoryBus.RAM_SIZE) return -1;
+        if (maxLength == 0) return destination;
+        Ps1MemoryBus bus = machine.getBus();
+        boolean sourceEnded = false;
+        for (int i = 0; i < maxLength; i++) {
+            int value = sourceEnded ? 0 : bus.read8(source + i);
+            bus.write8(destination + i, value);
+            if (value == 0) sourceEnded = true;
+        }
+        return destination;
+    }
+
+    private int stringLength(Ps1Machine machine, int source) {
+        Ps1MemoryBus bus = machine.getBus();
+        for (int i = 0; i < Ps1MemoryBus.RAM_SIZE; i++) {
+            if (bus.read8(source + i) == 0) return i;
+        }
+        return -1;
+    }
+
+    private int findStringCharacter(Ps1Machine machine, int source, int character, boolean lastMatch) {
+        Ps1MemoryBus bus = machine.getBus();
+        int target = character & 0xFF;
+        int last = 0;
+        for (int i = 0; i < Ps1MemoryBus.RAM_SIZE; i++) {
+            int value = bus.read8(source + i);
+            if (value == target) {
+                if (!lastMatch) return source + i;
+                last = source + i;
+            }
+            if (value == 0) return last;
+        }
+        return -1;
+    }
+
+    private static int asciiCase(int character, boolean upper) {
+        int value = character & 0xFF;
+        if (upper && value >= 'a' && value <= 'z') return value - ('a' - 'A');
+        if (!upper && value >= 'A' && value <= 'Z') return value + ('a' - 'A');
+        return value;
     }
 
     private int dispatchB0(Ps1Machine machine, int function) {

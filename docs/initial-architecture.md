@@ -38,7 +38,7 @@ validation/
   ps1/                      Testes determinísticos e verificações por componente
 ```
 
-A estrutura é uma proposta de organização. `engine/ps1` conecta CPU MIPS R3000A parcial, RAM/scratchpad, interrupções, timers e GPU parcial. Um carregador PS-X EXE inicia uma sessão experimental; o scheduler provisório avança um ciclo de sistema por instrução e emite snapshots ao completar quadros. `Ps1VideoFrameView` os apresenta em Canvas nativo. O HLE atende a algumas rotinas A0 de heap e memória, serviços B0 de eventos/timers e C0 InitRCnt; não emula arquivos/stdio A0, HLE completo, jogos de disco ou compatibilidade de jogos.
+A estrutura é uma proposta de organização. `engine/ps1` conecta CPU MIPS R3000A parcial, RAM/scratchpad, interrupções, timers e GPU parcial. Um carregador PS-X EXE inicia uma sessão experimental; o scheduler provisório avança um ciclo de sistema por instrução e emite snapshots ao completar quadros. `Ps1VideoFrameView` os apresenta em Canvas nativo. O HLE atende a rotinas A0 de heap, memória e strings básicas, serviços B0 de eventos/timers e C0 InitRCnt; não emula arquivos/stdio A0, HLE completo, jogos de disco ou compatibilidade de jogos.
 
 ## Sequência de desenvolvimento
 

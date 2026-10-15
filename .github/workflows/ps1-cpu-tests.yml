@@ -25,5 +25,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Run PS1 CPU tests
+      - name: Run PS1 engine tests
         run: gradle :engine:ps1:test
+      - name: Compile native Android app
+        run: gradle :app:assembleDebug

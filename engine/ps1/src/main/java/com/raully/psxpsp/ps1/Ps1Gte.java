@@ -61,14 +61,24 @@ final class Ps1Gte {
 
     void writeControl(int index, int value) {
         int register = index & 31;
-        if (register == 31) control[31] = value & 0x7FFFF000; // FLAG writable bits; summary is hardware-derived.
-        else control[register] = value;
+        if (register == 31) {
+            control[31] = value & 0x7FFFF000;
+            updateFlagSummary();
+        } else control[register] = value;
     }
 
-    /** Execute one supported command. The command number is instruction bits 5..0. */
-    boolean executeCommand(int command) {
-        if ((command & 0x3F) != 0x06) return false; // NCLIP is the initial implemented command.
-        executeNclip();
+    /** Execute one supported command using its full instruction word. */
+    boolean executeCommand(int instruction) {
+        int command = instruction & 0x3F;
+        control[31] = 0;
+        if (command == 0x06) {
+            executeNclip();
+        } else if (command == 0x01) {
+            executeRtps((instruction & (1 << 19)) != 0);
+        } else {
+            return false;
+        }
+        updateFlagSummary();
         return true;
     }
 
@@ -82,7 +92,134 @@ final class Ps1Gte {
 
         long area = (long) x0 * y1 + (long) x1 * y2 + (long) x2 * y0
                 - (long) x0 * y2 - (long) x1 * y0 - (long) x2 * y1;
-        data[24] = (int) area; // MAC0
+        storeMac0(area);
+    }
+
+    private void executeRtps(boolean shiftFraction) {
+        int packedXy = data[0];
+        int vx = (short) packedXy;
+        int vy = (short) (packedXy >>> 16);
+        int vz = (short) data[1];
+
+        long rawMac1 = transformRow(0, vx, vy, vz, control[5]);
+        long rawMac2 = transformRow(1, vx, vy, vz, control[6]);
+        long rawMac3 = transformRow(2, vx, vy, vz, control[7]);
+        checkMacOverflow(rawMac1, 30, 27);
+        checkMacOverflow(rawMac2, 29, 26);
+        checkMacOverflow(rawMac3, 28, 25);
+
+        long shift = shiftFraction ? 12 : 0;
+        int mac1 = (int) (rawMac1 >> shift);
+        int mac2 = (int) (rawMac2 >> shift);
+        int mac3 = (int) (rawMac3 >> shift);
+        data[25] = mac1;
+        data[26] = mac2;
+        data[27] = mac3;
+        data[9] = saturateIr(mac1, 1);
+        data[10] = saturateIr(mac2, 2);
+        data[11] = saturateIr(mac3, 3);
+
+        int depth = saturateUnsigned16(rawMac3 >> 12, 18);
+        data[16] = data[17];
+        data[17] = data[18];
+        data[18] = data[19];
+        data[19] = depth;
+
+        int quotient = perspectiveQuotient(control[26] & 0xFFFF, depth);
+        int screenXMac = storeMac0((long) control[24] + (long) data[9] * quotient);
+        int screenYMac = storeMac0((long) control[25] + (long) data[10] * quotient);
+        int screenX = saturateScreen(screenXMac >> 16, 14);
+        int screenY = saturateScreen(screenYMac >> 16, 13);
+        writeData(15, ((screenY & 0xFFFF) << 16) | (screenX & 0xFFFF));
+
+        int depthCueMac = storeMac0((long) (short) control[27] * quotient + control[28]);
+        data[8] = saturateIr0(depthCueMac >> 12);
+    }
+
+    private long transformRow(int row, int vx, int vy, int vz, int translation) {
+        int first;
+        int second;
+        int third;
+        switch (row) {
+            case 0:
+                first = (short) control[0];
+                second = (short) (control[0] >>> 16);
+                third = (short) control[1];
+                break;
+            case 1:
+                first = (short) (control[1] >>> 16);
+                second = (short) control[2];
+                third = (short) (control[2] >>> 16);
+                break;
+            default:
+                first = (short) control[3];
+                second = (short) (control[3] >>> 16);
+                third = (short) control[4];
+                break;
+        }
+        return ((long) translation << 12)
+                + (long) first * vx + (long) second * vy + (long) third * vz;
+    }
+
+    private int perspectiveQuotient(int h, int depth) {
+        if (depth == 0 || h >= (long) depth * 2L) {
+            setFlag(1 << 17);
+            return 0x1FFFF;
+        }
+        return (int) ((((long) h * 0x20000L / depth) + 1L) / 2L);
+    }
+
+    private int saturateIr(int value, int register) {
+        if (value > 0x7FFF) {
+            setFlag(1 << (25 - register));
+            return 0x7FFF;
+        }
+        if (value < -0x8000) {
+            setFlag(1 << (25 - register));
+            return -0x8000;
+        }
+        return value;
+    }
+
+    private int saturateIr0(int value) {
+        if (value < 0) { setFlag(1 << 12); return 0; }
+        if (value > 0x1000) { setFlag(1 << 12); return 0x1000; }
+        return value;
+    }
+
+    private int saturateUnsigned16(long value, int flagBit) {
+        if (value < 0) { setFlag(1 << flagBit); return 0; }
+        if (value > 0xFFFF) { setFlag(1 << flagBit); return 0xFFFF; }
+        return (int) value;
+    }
+
+    private int saturateScreen(int value, int flagBit) {
+        if (value < -0x400) { setFlag(1 << flagBit); return -0x400; }
+        if (value > 0x3FF) { setFlag(1 << flagBit); return 0x3FF; }
+        return value;
+    }
+
+    private int storeMac0(long value) {
+        if (value > Integer.MAX_VALUE) setFlag(1 << 16);
+        else if (value < Integer.MIN_VALUE) setFlag(1 << 15);
+        data[24] = (int) value;
+        return data[24];
+    }
+
+    private void checkMacOverflow(long value, int positiveBit, int negativeBit) {
+        long max = (1L << 43) - 1L;
+        long min = -(1L << 43);
+        if (value > max) setFlag(1 << positiveBit);
+        else if (value < min) setFlag(1 << negativeBit);
+    }
+
+    private void setFlag(int mask) {
+        control[31] |= mask;
+    }
+
+    private void updateFlagSummary() {
+        int flags = control[31] & 0x7FFFF000;
+        control[31] = flags | (flags == 0 ? 0 : 0x80000000);
     }
 
     private static int packRgb5(int red, int green, int blue) {

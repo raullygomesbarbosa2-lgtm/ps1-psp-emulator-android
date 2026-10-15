@@ -231,7 +231,7 @@ public final class MipsR3000A {
                 if ((cp0[CP0_STATUS] & STATUS_CU2) == 0) {
                     throw new CpuFault(EXC_COPROCESSOR_UNUSABLE, -1);
                 }
-                executeCop2(instruction, rs, rt, rd, function);
+                executeCop2(instruction, rs, rt, rd);
                 return;
             case 0x20: scheduleLoad(rt, sign8(bus.read8(effectiveAddress(rs, immediate)))); return;
             case 0x21: {
@@ -350,7 +350,7 @@ public final class MipsR3000A {
         throw new CpuFault(EXC_RESERVED_INSTRUCTION, -1);
     }
 
-    private void executeCop2(int instruction, int rs, int rt, int rd, int function) throws CpuFault {
+    private void executeCop2(int instruction, int rs, int rt, int rd) throws CpuFault {
         switch (rs) {
             case 0: scheduleLoad(rt, gte.readData(rd)); return; // MFC2
             case 2: scheduleLoad(rt, gte.readControl(rd)); return; // CFC2
@@ -358,7 +358,7 @@ public final class MipsR3000A {
             case 6: gte.writeControl(rd, readRegister(rt)); return; // CTC2
             default:
                 if (rs >= 16) {
-                    if (gte.executeCommand(function)) return;
+                    if (gte.executeCommand(instruction)) return;
                 }
                 throw new CpuFault(EXC_RESERVED_INSTRUCTION, -1);
         }

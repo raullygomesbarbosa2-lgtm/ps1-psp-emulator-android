@@ -37,14 +37,17 @@ public final class Ps1Session implements AutoCloseable {
     public Ps1ExecutableLoader.ExecutableInfo getExecutableInfo() { return executableInfo; }
     public boolean hasDisc() { return machine.getBus().getCdrom().hasDisc(); }
 
-    /** Update the live digital-pad buttons from touch controls or an Android gamepad. */
-    public void setControllerButtonMask(int mask) {
-        machine.getBus().getControllerPort().setButtonMask(mask);
+    /** Set the combined digital controls from touch and physical gamepad input. */
+    public void setControllerButtons(int pressedMask) {
+        machine.getBus().getControllerPort().setPressedButtons(pressedMask);
     }
 
-    public int getControllerButtonMask() {
-        return machine.getBus().getControllerPort().getButtonMask();
+    public int getControllerButtons() {
+        return machine.getBus().getControllerPort().getPressedButtons();
     }
+
+    /** Snapshot the actual current output of the PS1 GPU. */
+    public Ps1VideoFrame renderCurrentFrame() { return machine.renderDisplayFrame(); }
 
     /** Attach an already opened disc image to the machine's CD-ROM device. */
     public synchronized void insertDisc(Ps1DiscImage image) throws IOException {

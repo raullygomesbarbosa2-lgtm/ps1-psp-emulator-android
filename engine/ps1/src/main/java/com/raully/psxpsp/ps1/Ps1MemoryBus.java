@@ -4,8 +4,8 @@ import java.util.Arrays;
 
 /**
  * Initial PS1 address bus: mirrored 2 MiB RAM, 1 KiB scratchpad, selected
- * memory-control registers, interrupt controller, video timing, initial CD-ROM
- * registers, and partial GP0/GP1 GPU ports. Other MMIO, ROM and expansion regions fault explicitly.
+ * memory-control registers, interrupt controller, video timing, digital SIO0 pad,
+ * CD-ROM registers and partial GP0/GP1 GPU ports. Other MMIO, ROM and expansion regions fault explicitly.
  */
 public final class Ps1MemoryBus implements Ps1Bus {
     public static final int RAM_SIZE = 2 * 1024 * 1024;
@@ -15,7 +15,7 @@ public final class Ps1MemoryBus implements Ps1Bus {
     public static final int INTERRUPT_STATUS = 0x1F801070;
     public static final int INTERRUPT_MASK = 0x1F801074;
     public static final int CDROM_BASE = Ps1CdromController.BASE_ADDRESS;
-    public static final int SIO0_BASE = Ps1ControllerPort.BASE_ADDRESS;
+    public static final int CONTROLLER_BASE = Ps1ControllerPort.BASE_ADDRESS;
     public static final int DMA_BASE = Ps1DmaController.BASE_ADDRESS;
     public static final int GPU_CONTROL = 0x1F801814;
 
@@ -59,8 +59,8 @@ public final class Ps1MemoryBus implements Ps1Bus {
         if (spu.isMappedAddress(physicalAddress)) {
             return spu.readRegisterByte(physicalAddress - Ps1Spu.BASE_ADDRESS);
         }
-        if (controllerPort.isMappedAddress(physicalAddress)) {
-            return controllerPort.readRegister(physicalAddress - SIO0_BASE);
+        if (isControllerAddress(physicalAddress)) {
+            return readControllerByte(physicalAddress - CONTROLLER_BASE);
         }
         if (dma.isMappedAddress(physicalAddress)) {
             int word = dma.readRegister(physicalAddress - DMA_BASE);
@@ -90,6 +90,9 @@ public final class Ps1MemoryBus implements Ps1Bus {
         if (spu.isMappedAddress(physicalAddress)) {
             return spu.readRegister(physicalAddress - Ps1Spu.BASE_ADDRESS);
         }
+        if (isControllerAddress(physicalAddress)) {
+            return readControllerValue(physicalAddress - CONTROLLER_BASE, 2);
+        }
         if (timers.isMappedAddress(physicalAddress)) {
             int word = timers.readRegister(physicalAddress & ~3);
             return (word >>> ((physicalAddress & 2) * 8)) & 0xFFFF;
@@ -100,6 +103,16 @@ public final class Ps1MemoryBus implements Ps1Bus {
     @Override
     public int read32(int address) {
         int physicalAddress = toPhysicalAddress(address, false);
+        if (spu.isMappedAddress(physicalAddress)) {
+            int offset = physicalAddress - Ps1Spu.BASE_ADDRESS;
+            int low = spu.readRegister(offset);
+            int high = offset == Ps1Spu.TRANSFER_FIFO_OFFSET
+                    ? spu.readRegister(offset) : spu.readRegister(offset + 2);
+            return low | (high << 16);
+        }
+        if (isControllerAddress(physicalAddress)) {
+            return readControllerValue(physicalAddress - CONTROLLER_BASE, 4);
+        }
         if (timers.isMappedAddress(physicalAddress)) return timers.readRegister(physicalAddress & ~3) & 0xFFFF;
         if (dma.isMappedAddress(physicalAddress) && (physicalAddress & 3) == 0) {
             return dma.readRegister(physicalAddress - DMA_BASE);
@@ -118,8 +131,8 @@ public final class Ps1MemoryBus implements Ps1Bus {
             spu.writeRegisterByte(physicalAddress - Ps1Spu.BASE_ADDRESS, value);
             return;
         }
-        if (controllerPort.isMappedAddress(physicalAddress)) {
-            controllerPort.writeRegister(physicalAddress - SIO0_BASE, value & 0xFF, 0xFF);
+        if (isControllerAddress(physicalAddress)) {
+            writeControllerByte(physicalAddress - CONTROLLER_BASE, value);
             return;
         }
         if (dma.isMappedAddress(physicalAddress)) {
@@ -160,6 +173,10 @@ public final class Ps1MemoryBus implements Ps1Bus {
             spu.writeRegister(physicalAddress - Ps1Spu.BASE_ADDRESS, value);
             return;
         }
+        if (isControllerAddress(physicalAddress)) {
+            writeControllerValue(physicalAddress - CONTROLLER_BASE, value, 2);
+            return;
+        }
         if (timers.isMappedAddress(physicalAddress)) {
             int shift = (physicalAddress & 2) * 8;
             int mask = 0xFFFF << shift;
@@ -176,7 +193,15 @@ public final class Ps1MemoryBus implements Ps1Bus {
         if (spu.isMappedAddress(physicalAddress)) {
             int offset = physicalAddress - Ps1Spu.BASE_ADDRESS;
             spu.writeRegister(offset, value & 0xFFFF);
-            if (offset + 2 < Ps1Spu.REGISTER_BYTES) spu.writeRegister(offset + 2, value >>> 16);
+            if (offset == Ps1Spu.TRANSFER_FIFO_OFFSET) {
+                spu.writeRegister(offset, value >>> 16);
+            } else if (offset + 2 < Ps1Spu.REGISTER_BYTES) {
+                spu.writeRegister(offset + 2, value >>> 16);
+            }
+            return;
+        }
+        if (isControllerAddress(physicalAddress)) {
+            writeControllerValue(physicalAddress - CONTROLLER_BASE, value, 4);
             return;
         }
         if (physicalAddress == Ps1Gpu.DATA_PORT) {
@@ -229,6 +254,49 @@ public final class Ps1MemoryBus implements Ps1Bus {
 
     private boolean isCdromAddress(int physicalAddress) {
         return physicalAddress >= CDROM_BASE && physicalAddress < CDROM_BASE + 4;
+    }
+
+    private boolean isControllerAddress(int physicalAddress) {
+        return physicalAddress >= CONTROLLER_BASE && physicalAddress < CONTROLLER_BASE + 0x10;
+    }
+
+    private int readControllerByte(int offset) {
+        if (offset == 0) return controllerPort.readRegister(0) & 0xFF;
+        int registerOffset;
+        int lane;
+        if (offset >= 4 && offset <= 7) { registerOffset = 4; lane = offset - 4; }
+        else if (offset >= 8 && offset <= 9) { registerOffset = 8; lane = offset - 8; }
+        else if (offset >= 10 && offset <= 11) { registerOffset = 10; lane = offset - 10; }
+        else if (offset >= 14 && offset <= 15) { registerOffset = 14; lane = offset - 14; }
+        else return 0;
+        return (controllerPort.readRegister(registerOffset) >>> (lane * 8)) & 0xFF;
+    }
+
+    private int readControllerValue(int offset, int size) {
+        if (offset == 0) return controllerPort.readRegister(0) & 0xFF;
+        if (offset == 4) return controllerPort.readRegister(4) & (size == 2 ? 0xFFFF : -1);
+        if (offset == 8) return controllerPort.readRegister(8) & (size == 2 ? 0xFFFF : -1);
+        if (offset == 10) return controllerPort.readRegister(10) & (size == 2 ? 0xFFFF : -1);
+        if (offset == 14) return controllerPort.readRegister(14) & (size == 2 ? 0xFFFF : -1);
+        return readControllerByte(offset) | (size >= 2 ? readControllerByte(offset + 1) << 8 : 0)
+                | (size >= 4 ? readControllerByte(offset + 2) << 16 | readControllerByte(offset + 3) << 24 : 0);
+    }
+
+    private void writeControllerByte(int offset, int value) {
+        if (offset == 0) { controllerPort.writeRegister(0, value); return; }
+        int registerOffset;
+        int lane;
+        if (offset >= 8 && offset <= 9) { registerOffset = 8; lane = offset - 8; }
+        else if (offset >= 10 && offset <= 11) { registerOffset = 10; lane = offset - 10; }
+        else if (offset >= 14 && offset <= 15) { registerOffset = 14; lane = offset - 14; }
+        else return;
+        if (lane == 0) controllerPort.writeRegister(registerOffset, value);
+    }
+
+    private void writeControllerValue(int offset, int value, int size) {
+        if (offset == 0) { controllerPort.writeRegister(0, value); return; }
+        if (offset == 8 || offset == 10 || offset == 14) controllerPort.writeRegister(offset, value);
+        else for (int i = 0; i < size; i++) writeControllerByte(offset + i, value >>> (i * 8));
     }
 
     private boolean isGpuDataRegister(int physicalAddress) {

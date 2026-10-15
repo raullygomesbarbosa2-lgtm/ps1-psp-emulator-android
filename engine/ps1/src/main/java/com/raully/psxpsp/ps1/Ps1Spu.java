@@ -14,6 +14,7 @@ public final class Ps1Spu {
     public static final int VOICE_COUNT = 24;
     public static final int RAM_BYTES = 512 * 1024;
     public static final int SAMPLE_RATE = 44100;
+    public static final int TRANSFER_FIFO_OFFSET = 0x1A8;
     private static final int RAM_MASK = RAM_BYTES - 1;
     private static final int ADPCM_BLOCK_BYTES = 16;
     private static final int SAMPLES_PER_BLOCK = 28;
@@ -24,7 +25,7 @@ public final class Ps1Spu {
     private static final int SPU_KEY_OFF_LOW = 0x18C;
     private static final int SPU_KEY_OFF_HIGH = 0x18E;
     private static final int SPU_TRANSFER_ADDRESS = 0x1A6;
-    private static final int SPU_TRANSFER_FIFO = 0x1A8;
+    private static final int SPU_TRANSFER_FIFO = TRANSFER_FIFO_OFFSET;
     private static final int SPU_CONTROL = 0x1AA;
     private static final int SPU_TRANSFER_CONTROL = 0x1AC;
     private static final int SPU_STATUS = 0x1AE;

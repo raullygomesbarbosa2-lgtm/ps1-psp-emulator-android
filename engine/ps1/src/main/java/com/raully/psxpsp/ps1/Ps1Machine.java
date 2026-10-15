@@ -21,8 +21,8 @@ public final class Ps1Machine {
     public Ps1VideoTiming getVideoTiming() { return videoTiming; }
     public Ps1Gpu getGpu() { return bus.getGpu(); }
     public Ps1Spu getSpu() { return bus.getSpu(); }
-    public Ps1VideoFrame renderDisplayFrame() { return bus.getGpu().renderDisplayFrame(); }
     public short[] renderAudioFrames(int frameCount) { return bus.getSpu().renderPcm(frameCount); }
+    public Ps1VideoFrame renderDisplayFrame() { return bus.getGpu().renderDisplayFrame(); }
 
     /** Start execution at an explicitly prepared entry point; no BIOS is synthesized. */
     public void startAt(int entryPoint) {

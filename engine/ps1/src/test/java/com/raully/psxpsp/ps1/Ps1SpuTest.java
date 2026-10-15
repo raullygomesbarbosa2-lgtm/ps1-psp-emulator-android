@@ -22,6 +22,12 @@ public final class Ps1SpuTest {
         assertEquals(0xABCD, bus.read16(base + 0x1A8));
         assertEquals(0x1234, bus.read16(base + 0x1A8));
 
+        bus.write16(base + 0x1A6, 4);
+        bus.write32(base + 0x1A8, 0x56789ABC);
+        bus.write16(base + 0x1A6, 4);
+        assertEquals(0x9ABC, bus.read16(base + 0x1A8));
+        assertEquals(0x5678, bus.read16(base + 0x1A8));
+
         bus.write16(base + 0x1A6, 3);
         bus.write8(base + 0x1A8, 0x78);
         bus.write8(base + 0x1A9, 0x56);
@@ -44,6 +50,7 @@ public final class Ps1SpuTest {
         bus.write16(base + 0x180, 0x3FFF); // main left volume
         bus.write16(base + 0x182, 0x3FFF); // main right volume
         bus.write16(base + 0x1AA, 0x8000); // enable SPU
+        assertEquals(0x8000, bus.read16(base + 0x1AA));
         bus.write16(base + 0x188, 1); // key on voice 0
 
         assertTrue(bus.getSpu().isVoiceActive(0));

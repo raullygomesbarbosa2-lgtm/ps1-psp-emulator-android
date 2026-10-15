@@ -1,6 +1,11 @@
 package com.raully.psxpsp.ps1;
 
-/** Small software BIOS dispatcher for the PS1 A0/B0/C0 call vectors. */
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.TreeMap;
+
+/** Small software BIOS dispatcher with limited memory, event, and timer services. */
 final class Ps1BiosHle {
     private static final int VECTOR_A0 = 0xA0;
     private static final int VECTOR_B0 = 0xB0;
@@ -9,11 +14,19 @@ final class Ps1BiosHle {
     private static final int EVENT_HANDLE_BASE = 0xF1000000;
 
     private final EventEntry[] events = new EventEntry[EVENT_COUNT];
+    private final TreeMap<Integer, Integer> freeHeapBlocks = new TreeMap<>();
+    private final Map<Integer, Integer> allocatedHeapBlocks = new HashMap<>();
+    private int heapBase;
+    private int heapSize;
 
     Ps1BiosHle() { reset(); }
 
     void reset() {
         for (int i = 0; i < events.length; i++) events[i] = new EventEntry();
+        freeHeapBlocks.clear();
+        allocatedHeapBlocks.clear();
+        heapBase = 0;
+        heapSize = 0;
     }
 
     /** Intercept a BIOS vector call; returns false when the PC is not a BIOS vector. */
@@ -24,11 +37,30 @@ final class Ps1BiosHle {
 
         int function = cpu.getRegister(9) & 0xFF; // t1 selects a table entry
         int result;
-        if (vector == VECTOR_B0) result = dispatchB0(machine, function);
-        else if (vector == VECTOR_C0) result = dispatchC0(machine, function);
-        else result = -1; // A0 file/stdio and library services are not emulated yet.
+        if (vector == VECTOR_A0) result = dispatchA0(machine, function);
+        else if (vector == VECTOR_B0) result = dispatchB0(machine, function);
+        else result = dispatchC0(machine, function);
         cpu.returnFromHleCall(result);
         return true;
+    }
+
+    private int dispatchA0(Ps1Machine machine, int function) {
+        MipsR3000A cpu = machine.getCpu();
+        switch (function) {
+            case 0x33: // malloc(size)
+                return allocate(cpu.getRegister(4));
+            case 0x34: // free(buf)
+                free(cpu.getRegister(4));
+                return 0;
+            case 0x37: // calloc(sizeX, sizeY)
+                return calloc(machine, cpu.getRegister(4), cpu.getRegister(5));
+            case 0x38: // realloc(oldBuf, newSize)
+                return realloc(machine, cpu.getRegister(4), cpu.getRegister(5));
+            case 0x39: // InitHeap(address, size)
+                return initializeHeap(cpu.getRegister(4), cpu.getRegister(5));
+            default:
+                return -1; // File/stdio, string, and other A0 calls are not implemented.
+        }
     }
 
     private int dispatchB0(Ps1Machine machine, int function) {
@@ -71,6 +103,138 @@ final class Ps1BiosHle {
             machine.getBus().getTimers().reset();
             return 0;
         }
+        return -1;
+    }
+
+    private int initializeHeap(int address, int size) {
+        if (size < 0) return -1;
+
+        long alignedAddress = ((long) address + 3L) & ~3L;
+        long skippedBytes = alignedAddress - (long) address;
+        long usableSize = (long) size - skippedBytes;
+        if (usableSize < 0 || usableSize > Integer.MAX_VALUE) return -1;
+        int alignedBase = (int) alignedAddress;
+        int physicalStart = physicalRamAddress(alignedBase);
+        if (physicalStart < 0 || physicalStart > Ps1MemoryBus.RAM_SIZE
+                || (long) physicalStart + usableSize > Ps1MemoryBus.RAM_SIZE) return -1;
+
+        int alignedSize = (int) usableSize & ~3;
+        freeHeapBlocks.clear();
+        allocatedHeapBlocks.clear();
+        heapBase = alignedBase;
+        heapSize = alignedSize;
+        if (alignedSize > 0) freeHeapBlocks.put(0, alignedSize);
+        return 0;
+    }
+
+    private int allocate(int requestedSize) {
+        int size = alignAllocationSize(requestedSize);
+        if (size <= 0 || heapSize == 0) return 0;
+
+        Iterator<Map.Entry<Integer, Integer>> iterator = freeHeapBlocks.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<Integer, Integer> block = iterator.next();
+            int available = block.getValue();
+            if (available < size) continue;
+            int offset = block.getKey();
+            iterator.remove();
+            if (available > size) freeHeapBlocks.put(offset + size, available - size);
+            allocatedHeapBlocks.put(offset, size);
+            return heapBase + offset;
+        }
+        return 0;
+    }
+
+    private void free(int pointer) {
+        int offset = heapOffset(pointer);
+        if (offset < 0) return;
+        Integer size = allocatedHeapBlocks.remove(offset);
+        if (size != null) addFreeHeapRange(offset, size);
+    }
+
+    private int calloc(Ps1Machine machine, int sizeX, int sizeY) {
+        if (sizeX < 0 || sizeY < 0) return 0;
+        long requested = (long) sizeX * (long) sizeY;
+        if (requested <= 0 || requested > Integer.MAX_VALUE) return 0;
+        int pointer = allocate((int) requested);
+        if (pointer == 0) return 0;
+        for (int i = 0; i < requested; i++) machine.getBus().write8(pointer + i, 0);
+        return pointer;
+    }
+
+    private int realloc(Ps1Machine machine, int oldPointer, int requestedSize) {
+        if (requestedSize < 0) return 0;
+        if (oldPointer == 0) return allocate(requestedSize);
+        if (requestedSize == 0) {
+            free(oldPointer);
+            return 0;
+        }
+
+        int offset = heapOffset(oldPointer);
+        if (offset < 0) return 0;
+        Integer oldSizeValue = allocatedHeapBlocks.get(offset);
+        if (oldSizeValue == null) return 0;
+        int oldSize = oldSizeValue;
+        int newSize = alignAllocationSize(requestedSize);
+        if (newSize <= 0) return 0;
+        if (newSize <= oldSize) {
+            if (newSize < oldSize) {
+                allocatedHeapBlocks.put(offset, newSize);
+                addFreeHeapRange(offset + newSize, oldSize - newSize);
+            }
+            return oldPointer;
+        }
+
+        int adjacentOffset = offset + oldSize;
+        Integer adjacentSize = freeHeapBlocks.get(adjacentOffset);
+        int growth = newSize - oldSize;
+        if (adjacentSize != null && adjacentSize >= growth) {
+            freeHeapBlocks.remove(adjacentOffset);
+            if (adjacentSize > growth) freeHeapBlocks.put(adjacentOffset + growth, adjacentSize - growth);
+            allocatedHeapBlocks.put(offset, newSize);
+            return oldPointer;
+        }
+
+        int newPointer = allocate(requestedSize);
+        if (newPointer == 0) return 0;
+        for (int i = 0; i < oldSize; i++) {
+            machine.getBus().write8(newPointer + i, machine.getBus().read8(oldPointer + i));
+        }
+        free(oldPointer);
+        return newPointer;
+    }
+
+    private void addFreeHeapRange(int offset, int size) {
+        if (size <= 0) return;
+        Map.Entry<Integer, Integer> lower = freeHeapBlocks.lowerEntry(offset);
+        if (lower != null && lower.getKey() + lower.getValue() == offset) {
+            offset = lower.getKey();
+            size += lower.getValue();
+            freeHeapBlocks.remove(lower.getKey());
+        }
+        Map.Entry<Integer, Integer> higher = freeHeapBlocks.ceilingEntry(offset);
+        if (higher != null && offset + size == higher.getKey()) {
+            size += higher.getValue();
+            freeHeapBlocks.remove(higher.getKey());
+        }
+        freeHeapBlocks.put(offset, size);
+    }
+
+    private int heapOffset(int pointer) {
+        long offset = (long) pointer - (long) heapBase;
+        if (offset < 0 || offset > Integer.MAX_VALUE) return -1;
+        return allocatedHeapBlocks.containsKey((int) offset) ? (int) offset : -1;
+    }
+
+    private static int alignAllocationSize(int size) {
+        if (size <= 0 || size > Integer.MAX_VALUE - 3) return 0;
+        return (size + 3) & ~3;
+    }
+
+    private static int physicalRamAddress(int address) {
+        int segment = address >>> 29;
+        if (segment == 0) return address;
+        if (segment == 4 || segment == 5) return address & 0x1FFFFFFF;
         return -1;
     }
 

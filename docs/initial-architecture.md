@@ -40,7 +40,7 @@ validation/
   psp/                      Testes do núcleo PSP quando essa etapa começar
 ```
 
-A estrutura é uma proposta de organização. `engine/ps1` conecta CPU MIPS R3000A parcial, RAM/scratchpad, interrupções, timers e GPU parcial. Um carregador PS-X EXE inicia uma sessão experimental; o scheduler provisório avança um ciclo de sistema por instrução e emite snapshots ao completar quadros. `Ps1VideoFrameView` os apresenta em Canvas nativo. O HLE atende apenas a alguns serviços B0 de eventos/timers e C0 InitRCnt; sem A0/arquivos, HLE completo, jogos de disco ou compatibilidade de jogos.
+A estrutura é uma proposta de organização. `engine/ps1` conecta CPU MIPS R3000A parcial, RAM/scratchpad, interrupções, timers e GPU parcial. Um carregador PS-X EXE inicia uma sessão experimental; o scheduler provisório avança um ciclo de sistema por instrução e emite snapshots ao completar quadros. `Ps1VideoFrameView` os apresenta em Canvas nativo. O HLE atende a algumas rotinas A0 de heap, serviços B0 de eventos/timers e C0 InitRCnt; não emula arquivos/stdio A0, HLE completo, jogos de disco ou compatibilidade de jogos.
 
 ## Sequência de desenvolvimento
 
@@ -64,5 +64,5 @@ A estrutura é uma proposta de organização. `engine/ps1` conecta CPU MIPS R300
 
 - A primeira meta é uma base de PS1 testável; um emulador completo exige implementar corretamente CPU, vídeo, áudio, CD-ROM e temporização, não apenas criar telas.
 - HLE pode substituir serviços comuns de BIOS, mas não é garantia de que todo jogo funcione sem a BIOS original.
-- `Ps1Machine.tickSystemCycles` avança timers e raster; GP1 define região/faixas. GP0 preenche/copia/transfere VRAM e rasteriza primitivas opacas sem textura; `renderDisplayFrame()` produz snapshots ARGB exibidos pela View Android. A tela pode receber quadros da sessão experimental PS-X EXE. O clock é aproximado; o HLE é parcial, sem CD-ROM, A0/arquivos, callbacks BIOS, texturas, semitransparência, FIFO/DMA, APK jogável ou teste em aparelho.
+- `Ps1Machine.tickSystemCycles` avança timers e raster; GP1 define região/faixas. GP0 preenche/copia/transfere VRAM e rasteriza primitivas opacas sem textura; `renderDisplayFrame()` produz snapshots ARGB exibidos pela View Android. A tela pode receber quadros da sessão experimental PS-X EXE. O clock é aproximado; o HLE é parcial, sem CD-ROM, arquivos/stdio A0, callbacks BIOS, texturas, semitransparência, FIFO/DMA, APK jogável ou teste em aparelho.
 - Antes de qualquer distribuição, validar requisitos legais aplicáveis a marcas, formatos de arquivo e distribuição do aplicativo. O app não deve fornecer firmware protegido ou jogos.

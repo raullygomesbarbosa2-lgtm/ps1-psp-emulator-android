@@ -222,6 +222,69 @@ public final class Ps1GpuTest {
                 & (1 << Ps1InterruptController.IRQ_GPU)) != 0); // I_STAT has its own acknowledge
     }
 
+    @Test
+    public void texturedTrianglesSample4BitClutAnd15BitVramPages() {
+        Ps1MemoryBus bus = new Ps1MemoryBus();
+        Ps1Gpu gpu = bus.getGpu();
+        gpu.writeVramPixel(0, 0, 0x0010); // 4-bit texel index 1 at U=1
+        gpu.writeVramPixel(17, 0, 0x001F); // CLUT index 1: red
+        writeTexturedTriangle(bus, 0x24808080, 50, 10, 0x00010001, 0x00000001);
+        assertEquals(0x001F, gpu.readVramPixel(51, 11));
+
+        Ps1MemoryBus directBus = new Ps1MemoryBus();
+        Ps1Gpu directGpu = directBus.getGpu();
+        directGpu.writeVramPixel(2, 0, 0x7C00); // direct 15-bit blue texel
+        directBus.write32(Ps1Gpu.DATA_PORT, 0xE1000100); // texture depth = 15-bit
+        writeTexturedTriangle(directBus, 0x24808080, 70, 10, 0x00000002, 0x01000002);
+        assertEquals(0x7C00, directGpu.readVramPixel(71, 11));
+    }
+
+    @Test
+    public void texturedTriangleSamples8BitClutAndHonorsSemiTransparency() {
+        Ps1MemoryBus bus = new Ps1MemoryBus();
+        Ps1Gpu gpu = bus.getGpu();
+        gpu.writeVramPixel(0, 0, 0x0002); // 8-bit texel index 2 at U=0
+        gpu.writeVramPixel(34, 0, 0x001F); // CLUT index 2: red
+        bus.write32(Ps1Gpu.DATA_PORT, 0xE1000080); // texture depth = 8-bit
+        writeTexturedTriangle(bus, 0x24808080, 90, 10, 0x00020000, 0x00800000);
+        assertEquals(0x001F, gpu.readVramPixel(91, 11));
+
+        Ps1MemoryBus blendBus = new Ps1MemoryBus();
+        Ps1Gpu blendGpu = blendBus.getGpu();
+        blendGpu.writeVramPixel(1, 0, 0x801F); // STP set: semitransparent red texel
+        blendGpu.writeVramPixel(101, 11, 0x7C00); // blue destination
+        blendBus.write32(Ps1Gpu.DATA_PORT, 0xE1000100); // direct 15-bit page, average blend
+        writeTexturedTriangle(blendBus, 0x26808080, 100, 10, 0x00000001, 0x01000001);
+        assertEquals(0xBC0F, blendGpu.readVramPixel(101, 11));
+    }
+
+    @Test
+    public void texturedVariableRectangleReadsUvClutAndSize() {
+        Ps1MemoryBus bus = new Ps1MemoryBus();
+        Ps1Gpu gpu = bus.getGpu();
+        gpu.writeVramPixel(0, 0, 0x0011); // U=1 and U=2 are both palette index 1
+        gpu.writeVramPixel(17, 0, 0x03E0); // CLUT index 1: green
+        bus.write32(Ps1Gpu.DATA_PORT, 0x64808080); // variable-size textured rectangle
+        bus.write32(Ps1Gpu.DATA_PORT, xy(120, 20));
+        bus.write32(Ps1Gpu.DATA_PORT, 0x00010001); // CLUT 1, UV (1,0)
+        bus.write32(Ps1Gpu.DATA_PORT, 2 | (2 << 16));
+
+        assertEquals(0x03E0, gpu.readVramPixel(120, 20));
+        assertEquals(0x03E0, gpu.readVramPixel(121, 21));
+        assertEquals(0, gpu.readVramPixel(122, 21));
+    }
+
+    private static void writeTexturedTriangle(Ps1MemoryBus bus, int command,
+                                              int x, int y, int uv0, int uv1) {
+        bus.write32(Ps1Gpu.DATA_PORT, command);
+        bus.write32(Ps1Gpu.DATA_PORT, xy(x, y));
+        bus.write32(Ps1Gpu.DATA_PORT, uv0);
+        bus.write32(Ps1Gpu.DATA_PORT, xy(x + 4, y));
+        bus.write32(Ps1Gpu.DATA_PORT, uv1);
+        bus.write32(Ps1Gpu.DATA_PORT, xy(x, y + 4));
+        bus.write32(Ps1Gpu.DATA_PORT, uv1);
+    }
+
     private static int xy(int x, int y) { return (x & 0x7FF) | ((y & 0x7FF) << 16); }
 
     private static int gp1(int command, int parameters) {

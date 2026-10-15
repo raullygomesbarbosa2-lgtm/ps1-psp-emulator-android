@@ -416,21 +416,38 @@ public final class Ps1Gpu {
     }
 
     private void renderPolygon(int command) {
-        int opcode = (packet[0] >>> 24) & 0xFF;
+        int opcode = command;
         boolean textured = (opcode & 0x04) != 0;
         boolean semiTransparent = (opcode & 0x02) != 0;
-        if (textured || semiTransparent) return;
         int vertexCount = (opcode & 0x08) != 0 ? 4 : 3;
         boolean gouraud = (opcode & 0x10) != 0;
         Vertex[] vertices = new Vertex[vertexCount];
         int cursor = 1;
         int flatColor = packet[0] & 0x00FFFFFF;
+        int clut = 0;
+        int texturePage = drawMode & 0x1FF;
         for (int i = 0; i < vertexCount; i++) {
             int color = gouraud && i > 0 ? packet[cursor++] & 0x00FFFFFF : flatColor;
-            vertices[i] = decodeDrawVertex(packet[cursor++], color);
+            int coordinate = packet[cursor++];
+            int u = 0;
+            int v = 0;
+            if (textured) {
+                int uv = packet[cursor++];
+                u = uv & 0xFF;
+                v = (uv >>> 8) & 0xFF;
+                if (i == 0) clut = (uv >>> 16) & 0xFFFF;
+                if (i == 1) {
+                    texturePage = (uv >>> 16) & 0x1FF;
+                    drawMode = (drawMode & ~0x1FF) | texturePage;
+                }
+            }
+            vertices[i] = decodeDrawVertex(coordinate, color, u, v);
         }
-        rasterTriangle(vertices[0], vertices[1], vertices[2]);
-        if (vertexCount == 4) rasterTriangle(vertices[1], vertices[2], vertices[3]);
+        TextureInfo texture = textured ? new TextureInfo(texturePage, clut) : null;
+        rasterTriangle(vertices[0], vertices[1], vertices[2], texture, semiTransparent);
+        if (vertexCount == 4) {
+            rasterTriangle(vertices[1], vertices[2], vertices[3], texture, semiTransparent);
+        }
     }
 
     private void renderLine(int command) {
@@ -446,13 +463,15 @@ public final class Ps1Gpu {
     }
 
     private void renderRectangle(int command) {
-        int opcode = (packet[0] >>> 24) & 0xFF;
-        if ((opcode & 0x04) != 0 || (opcode & 0x02) != 0) return;
+        int opcode = command;
+        boolean textured = (opcode & 0x04) != 0;
+        boolean semiTransparent = (opcode & 0x02) != 0;
         int sizeCode = (opcode >>> 3) & 3;
+        int sizeWordIndex = textured ? 3 : 2;
         int width;
         int height;
         if (sizeCode == 0) {
-            int size = packet[2];
+            int size = packet[sizeWordIndex];
             width = size & 0x3FF;
             height = (size >>> 16) & 0x1FF;
         } else {
@@ -463,9 +482,26 @@ public final class Ps1Gpu {
         if (width <= 0 || height <= 0) return;
         int color = packet[0] & 0x00FFFFFF;
         Vertex origin = decodeDrawVertex(packet[1], color);
+        TextureInfo texture = null;
+        int u = 0;
+        int v = 0;
+        if (textured) {
+            int uv = packet[2];
+            u = uv & 0xFF;
+            v = (uv >>> 8) & 0xFF;
+            texture = new TextureInfo(drawMode & 0x1FF, (uv >>> 16) & 0xFFFF);
+        }
         for (int row = 0; row < height; row++) {
             for (int column = 0; column < width; column++) {
-                writeDrawPixel(origin.x + column, origin.y + row, color);
+                if (texture == null) {
+                    writeDrawPixel(origin.x + column, origin.y + row, color, semiTransparent);
+                } else {
+                    int texel = sampleTexture(texture, u + column, v + row);
+                    if (texel == 0) continue;
+                    int modulated = modulateTextureColor(color, texel);
+                    boolean blend = semiTransparent && (texel & 0x8000) != 0;
+                    writeDrawPixel(origin.x + column, origin.y + row, modulated, blend, texel & 0x8000);
+                }
             }
         }
     }
@@ -500,6 +536,11 @@ public final class Ps1Gpu {
     }
 
     private void rasterTriangle(Vertex first, Vertex second, Vertex third) {
+        rasterTriangle(first, second, third, null, false);
+    }
+
+    private void rasterTriangle(Vertex first, Vertex second, Vertex third,
+                                TextureInfo texture, boolean semiTransparent) {
         long area = triangleArea(first, second, third);
         if (area == 0) return;
         if (area < 0) {
@@ -523,9 +564,62 @@ public final class Ps1Gpu {
                 int red = interpolate(first.red, second.red, third.red, w0, w1, w2, doubledArea);
                 int green = interpolate(first.green, second.green, third.green, w0, w1, w2, doubledArea);
                 int blue = interpolate(first.blue, second.blue, third.blue, w0, w1, w2, doubledArea);
-                writeDrawPixel(x, y, red | (green << 8) | (blue << 16));
+                int color = red | (green << 8) | (blue << 16);
+                if (texture != null) {
+                    int u = interpolate(first.u, second.u, third.u, w0, w1, w2, doubledArea);
+                    int v = interpolate(first.v, second.v, third.v, w0, w1, w2, doubledArea);
+                    int texel = sampleTexture(texture, u, v);
+                    if (texel == 0) continue;
+                    color = modulateTextureColor(color, texel);
+                    boolean blend = semiTransparent && (texel & 0x8000) != 0;
+                    writeDrawPixel(x, y, color, blend, texel & 0x8000);
+                } else {
+                    writeDrawPixel(x, y, color, semiTransparent);
+                }
             }
         }
+    }
+
+    private int sampleTexture(TextureInfo texture, int u, int v) {
+        int windowMaskX = (textureWindow & 0x1F) << 3;
+        int windowMaskY = ((textureWindow >>> 5) & 0x1F) << 3;
+        int windowOffsetX = ((textureWindow >>> 10) & 0x1F) << 3;
+        int windowOffsetY = ((textureWindow >>> 15) & 0x1F) << 3;
+        u = ((u & 0xFF) & ~windowMaskX) | (windowOffsetX & windowMaskX);
+        v = ((v & 0xFF) & ~windowMaskY) | (windowOffsetY & windowMaskY);
+        int pageX = (texture.page & 0x0F) << 6;
+        int pageY = ((texture.page >>> 4) & 1) << 8;
+        int depth = (texture.page >>> 7) & 3;
+        int texel;
+        if (depth == 0) {
+            int packed = vram[vramIndex(pageX + (u >>> 2), pageY + v)] & 0xFFFF;
+            int index = (packed >>> ((u & 3) << 2)) & 0x0F;
+            if (index == 0) return 0;
+            texel = vram[vramIndex(((texture.clut & 0x3F) << 4) + index,
+                    (texture.clut >>> 6) & 0x1FF)] & 0xFFFF;
+        } else if (depth == 1) {
+            int packed = vram[vramIndex(pageX + (u >>> 1), pageY + v)] & 0xFFFF;
+            int index = (packed >>> ((u & 1) << 3)) & 0xFF;
+            if (index == 0) return 0;
+            texel = vram[vramIndex(((texture.clut & 0x3F) << 4) + index,
+                    (texture.clut >>> 6) & 0x1FF)] & 0xFFFF;
+        } else if (depth == 2) {
+            texel = vram[vramIndex(pageX + u, pageY + v)] & 0xFFFF;
+        } else {
+            return 0;
+        }
+        return texel;
+    }
+
+    private static int modulateTextureColor(int modulation, int texel) {
+        int red = modulateChannel(expand5(texel & 0x1F), modulation & 0xFF);
+        int green = modulateChannel(expand5((texel >>> 5) & 0x1F), (modulation >>> 8) & 0xFF);
+        int blue = modulateChannel(expand5((texel >>> 10) & 0x1F), (modulation >>> 16) & 0xFF);
+        return red | (green << 8) | (blue << 16);
+    }
+
+    private static int modulateChannel(int texel, int modulation) {
+        return Math.min(255, (texel * modulation + 64) >>> 7);
     }
 
     private void rasterLine(Vertex first, Vertex second) {
@@ -552,22 +646,54 @@ public final class Ps1Gpu {
     }
 
     private Vertex decodeDrawVertex(int coordinate, int color) {
+        return decodeDrawVertex(coordinate, color, 0, 0);
+    }
+
+    private Vertex decodeDrawVertex(int coordinate, int color, int u, int v) {
         int offsetX = signExtend(drawOffset & 0x7FF, 11);
         int offsetY = signExtend((drawOffset >>> 11) & 0x7FF, 11);
         int x = signExtend(coordinate & 0x7FF, 11) + offsetX;
         int y = signExtend((coordinate >>> 16) & 0x7FF, 11) + offsetY;
-        return new Vertex(x, y, color & 0xFF, (color >>> 8) & 0xFF, (color >>> 16) & 0xFF);
+        return new Vertex(x, y, color & 0xFF, (color >>> 8) & 0xFF,
+                (color >>> 16) & 0xFF, u, v);
     }
 
     private void writeDrawPixel(int x, int y, int color) {
+        writeDrawPixel(x, y, color, false, 0);
+    }
+
+    private void writeDrawPixel(int x, int y, int color, boolean semiTransparent) {
+        writeDrawPixel(x, y, color, semiTransparent, 0);
+    }
+
+    private void writeDrawPixel(int x, int y, int color, boolean semiTransparent, int sourceMaskBit) {
         if (x < drawAreaLeft() || x > drawAreaRight()
                 || y < drawAreaTop() || y > drawAreaBottom()) return;
         int index = vramIndex(x, y);
         int oldPixel = vram[index] & 0xFFFF;
         if ((maskSettings & 2) != 0 && (oldPixel & 0x8000) != 0) return;
         int packed = rgb24To15(color);
+        if (semiTransparent) packed = blend15(packed, oldPixel, (drawMode >>> 5) & 3);
+        packed |= sourceMaskBit & 0x8000;
         if ((maskSettings & 1) != 0) packed |= 0x8000;
         vram[index] = (short) packed;
+    }
+
+    private static int blend15(int source, int destination, int mode) {
+        int result = 0;
+        for (int shift = 0; shift <= 10; shift += 5) {
+            int src = (source >>> shift) & 0x1F;
+            int dst = (destination >>> shift) & 0x1F;
+            int value;
+            switch (mode & 3) {
+                case 0: value = (src + dst) >>> 1; break;
+                case 1: value = Math.min(31, src + dst); break;
+                case 2: value = Math.max(0, dst - src); break;
+                default: value = Math.min(31, dst + (src >>> 2)); break;
+            }
+            result |= value << shift;
+        }
+        return result;
     }
 
     private int drawAreaLeft() { return drawAreaTopLeft & 0x3FF; }
@@ -607,12 +733,25 @@ public final class Ps1Gpu {
         final int red;
         final int green;
         final int blue;
-        Vertex(int x, int y, int red, int green, int blue) {
+        final int u;
+        final int v;
+        Vertex(int x, int y, int red, int green, int blue, int u, int v) {
             this.x = x;
             this.y = y;
             this.red = red;
             this.green = green;
             this.blue = blue;
+            this.u = u;
+            this.v = v;
+        }
+    }
+
+    private static final class TextureInfo {
+        final int page;
+        final int clut;
+        TextureInfo(int page, int clut) {
+            this.page = page & 0x1FF;
+            this.clut = clut & 0xFFFF;
         }
     }
 

@@ -3,9 +3,8 @@ package com.raully.psxpsp.ps1;
 import java.util.Arrays;
 
 /**
- * Early PS1 GPU model: GP1 display control, a 1024x512 15-bit VRAM, basic GP0
- * VRAM operations, and packet consumption for common primitive commands.
- * Polygon/line/texture rasterization and a timed FIFO are not implemented.
+ * Early PS1 GPU model: GP1 display control, 1024x512 VRAM, basic GP0 rasterization
+ * and a CPU-readable ARGB frame snapshot. Textures, blending, FIFO and timing remain partial.
  */
 public final class Ps1Gpu {
     public static final int DATA_PORT = 0x1F801810;
@@ -43,6 +42,13 @@ public final class Ps1Gpu {
     private boolean discardPacket;
     private boolean polylineActive;
     private boolean imageUploadActive;
+    private boolean polylineGouraud;
+    private boolean polylineDrawEnabled;
+    private boolean polylineHasPrevious;
+    private boolean polylineExpectColor;
+    private int polylinePreviousCoordinate;
+    private int polylinePreviousColor;
+    private int polylineNextColor;
     private int imageX;
     private int imageY;
     private int imageWidth;
@@ -98,6 +104,80 @@ public final class Ps1Gpu {
 
     /** A defensive snapshot; VRAM is 1 MiB of 16-bit pixels. */
     public short[] copyVram() { return vram.clone(); }
+
+    /**
+     * Convert the active display area to a standalone ARGB8888 frame. This is
+     * an engine output buffer, not a Android Surface/Bitmap renderer.
+     */
+    public Ps1VideoFrame renderDisplayFrame() {
+        int width = displayFrameWidth();
+        int height = Math.max(1, Math.min(VRAM_HEIGHT, videoTiming.getDisplayLineCount()));
+        int[] pixels = new int[width * height];
+        if (!displayDisabled) {
+            int sourceX = displayStart & 0x3FF;
+            int sourceY = (displayStart >>> 10) & 0x1FF;
+            if ((displayMode & 0x10) != 0) {
+                render24BitDisplay(pixels, width, height, sourceX, sourceY);
+            } else {
+                render15BitDisplay(pixels, width, height, sourceX, sourceY);
+            }
+        } else {
+            Arrays.fill(pixels, 0xFF000000);
+        }
+        return new Ps1VideoFrame(width, height, pixels);
+    }
+
+    private int displayFrameWidth() {
+        int start = horizontalRange & 0xFFF;
+        int end = (horizontalRange >>> 12) & 0xFFF;
+        int clocksPerPixel;
+        if ((displayMode & 0x40) != 0) clocksPerPixel = 7;
+        else {
+            switch (displayMode & 3) {
+                case 0: clocksPerPixel = 10; break;
+                case 1: clocksPerPixel = 8; break;
+                case 2: clocksPerPixel = 5; break;
+                default: clocksPerPixel = 4; break;
+            }
+        }
+        int range = (end - start) & 0xFFF;
+        int width = ((range / clocksPerPixel) + 2) & ~3;
+        return Math.max(1, Math.min(VRAM_WIDTH, width));
+    }
+
+    private void render15BitDisplay(int[] pixels, int width, int height, int sourceX, int sourceY) {
+        for (int y = 0; y < height; y++) {
+            int vramY = (sourceY + y) & 0x1FF;
+            for (int x = 0; x < width; x++) {
+                int packed = vram[vramY * VRAM_WIDTH + ((sourceX + x) & 0x3FF)] & 0x7FFF;
+                int red = expand5(packed & 0x1F);
+                int green = expand5((packed >>> 5) & 0x1F);
+                int blue = expand5((packed >>> 10) & 0x1F);
+                pixels[y * width + x] = 0xFF000000 | (red << 16) | (green << 8) | blue;
+            }
+        }
+    }
+
+    private void render24BitDisplay(int[] pixels, int width, int height, int sourceX, int sourceY) {
+        final int vramByteSize = VRAM_PIXELS * 2;
+        for (int y = 0; y < height; y++) {
+            int lineBase = (((sourceY + y) & 0x1FF) * VRAM_WIDTH * 2 + sourceX * 2) % vramByteSize;
+            for (int x = 0; x < width; x++) {
+                int byteOffset = (lineBase + x * 3) % vramByteSize;
+                int red = readVramByte(byteOffset);
+                int green = readVramByte((byteOffset + 1) % vramByteSize);
+                int blue = readVramByte((byteOffset + 2) % vramByteSize);
+                pixels[y * width + x] = 0xFF000000 | (red << 16) | (green << 8) | blue;
+            }
+        }
+    }
+
+    private int readVramByte(int byteOffset) {
+        int word = vram[(byteOffset >>> 1) & (VRAM_PIXELS - 1)] & 0xFFFF;
+        return (byteOffset & 1) == 0 ? word & 0xFF : (word >>> 8) & 0xFF;
+    }
+
+    private static int expand5(int value) { return (value << 3) | (value >>> 2); }
 
     /** GPUSTAT fields currently modeled, including readiness for the synchronous GP0 path. */
     public int readStatus() {
@@ -196,7 +276,7 @@ public final class Ps1Gpu {
             return;
         }
         if (polylineActive) {
-            if (value == POLYLINE_END) polylineActive = false;
+            consumePolylineWord(value);
             return;
         }
         if (pendingWords > 0) {
@@ -218,7 +298,7 @@ public final class Ps1Gpu {
         drawMode = 0;
         textureWindow = 0;
         drawAreaTopLeft = 0;
-        drawAreaBottomRight = 0;
+        drawAreaBottomRight = (511 << 10) | 1023;
         drawOffset = 0;
         maskSettings = 0;
         gpuInterrupt = false;
@@ -261,6 +341,11 @@ public final class Ps1Gpu {
         if (opcode >= 0x40 && opcode <= 0x5F) {
             if ((opcode & 0x08) != 0) {
                 polylineActive = true;
+                polylineGouraud = (opcode & 0x10) != 0;
+                polylineDrawEnabled = (opcode & 0x02) == 0;
+                polylineHasPrevious = false;
+                polylineExpectColor = false;
+                polylinePreviousColor = word & 0x00FFFFFF;
                 activeCommand = -1;
                 return;
             }
@@ -290,7 +375,13 @@ public final class Ps1Gpu {
     private void finishPacket() {
         int command = activeCommand;
         activeCommand = -1;
-        switch (command) {
+        if (command >= 0x20 && command <= 0x3F) {
+            renderPolygon(command);
+        } else if (command >= 0x40 && command <= 0x5F) {
+            renderLine(command);
+        } else if (command >= 0x60 && command <= 0x7F) {
+            renderRectangle(command);
+        } else switch (command) {
             case 0x02:
                 fillRectangle(packet[0], packet[1], packet[2]);
                 break;
@@ -321,6 +412,207 @@ public final class Ps1Gpu {
             case 0xE5: drawOffset = parameters & 0x003FFFFF; break;
             case 0xE6: maskSettings = parameters & 3; break;
             default: break;
+        }
+    }
+
+    private void renderPolygon(int command) {
+        int opcode = (packet[0] >>> 24) & 0xFF;
+        boolean textured = (opcode & 0x04) != 0;
+        boolean semiTransparent = (opcode & 0x02) != 0;
+        if (textured || semiTransparent) return;
+        int vertexCount = (opcode & 0x08) != 0 ? 4 : 3;
+        boolean gouraud = (opcode & 0x10) != 0;
+        Vertex[] vertices = new Vertex[vertexCount];
+        int cursor = 1;
+        int flatColor = packet[0] & 0x00FFFFFF;
+        for (int i = 0; i < vertexCount; i++) {
+            int color = gouraud && i > 0 ? packet[cursor++] & 0x00FFFFFF : flatColor;
+            vertices[i] = decodeDrawVertex(packet[cursor++], color);
+        }
+        rasterTriangle(vertices[0], vertices[1], vertices[2]);
+        if (vertexCount == 4) rasterTriangle(vertices[1], vertices[2], vertices[3]);
+    }
+
+    private void renderLine(int command) {
+        int opcode = (packet[0] >>> 24) & 0xFF;
+        if ((opcode & 0x08) != 0 || (opcode & 0x02) != 0) return;
+        boolean gouraud = (opcode & 0x10) != 0;
+        int firstColor = packet[0] & 0x00FFFFFF;
+        Vertex first = decodeDrawVertex(packet[1], firstColor);
+        Vertex second = gouraud
+                ? decodeDrawVertex(packet[3], packet[2] & 0x00FFFFFF)
+                : decodeDrawVertex(packet[2], firstColor);
+        rasterLine(first, second);
+    }
+
+    private void renderRectangle(int command) {
+        int opcode = (packet[0] >>> 24) & 0xFF;
+        if ((opcode & 0x04) != 0 || (opcode & 0x02) != 0) return;
+        int sizeCode = (opcode >>> 3) & 3;
+        int width;
+        int height;
+        if (sizeCode == 0) {
+            int size = packet[2];
+            width = size & 0x3FF;
+            height = (size >>> 16) & 0x1FF;
+        } else {
+            int fixedSize = sizeCode == 1 ? 1 : sizeCode == 2 ? 8 : 16;
+            width = fixedSize;
+            height = fixedSize;
+        }
+        if (width <= 0 || height <= 0) return;
+        int color = packet[0] & 0x00FFFFFF;
+        Vertex origin = decodeDrawVertex(packet[1], color);
+        for (int row = 0; row < height; row++) {
+            for (int column = 0; column < width; column++) {
+                writeDrawPixel(origin.x + column, origin.y + row, color);
+            }
+        }
+    }
+
+    private void consumePolylineWord(int word) {
+        if (word == POLYLINE_END) {
+            polylineActive = false;
+            polylineHasPrevious = false;
+            polylineExpectColor = false;
+            return;
+        }
+        if (!polylineHasPrevious) {
+            polylinePreviousCoordinate = word;
+            polylineHasPrevious = true;
+            polylineExpectColor = polylineGouraud;
+            return;
+        }
+        if (polylineGouraud && polylineExpectColor) {
+            polylineNextColor = word & 0x00FFFFFF;
+            polylineExpectColor = false;
+            return;
+        }
+        int nextColor = polylineGouraud ? polylineNextColor : polylinePreviousColor;
+        if (polylineDrawEnabled) {
+            Vertex first = decodeDrawVertex(polylinePreviousCoordinate, polylinePreviousColor);
+            Vertex second = decodeDrawVertex(word, nextColor);
+            rasterLine(first, second);
+        }
+        polylinePreviousCoordinate = word;
+        polylinePreviousColor = nextColor;
+        polylineExpectColor = polylineGouraud;
+    }
+
+    private void rasterTriangle(Vertex first, Vertex second, Vertex third) {
+        long area = triangleArea(first, second, third);
+        if (area == 0) return;
+        if (area < 0) {
+            Vertex swap = second;
+            second = third;
+            third = swap;
+            area = -area;
+        }
+        long doubledArea = area * 2;
+        int minX = Math.max(drawAreaLeft(), Math.min(first.x, Math.min(second.x, third.x)));
+        int maxX = Math.min(drawAreaRight(), Math.max(first.x, Math.max(second.x, third.x)));
+        int minY = Math.max(drawAreaTop(), Math.min(first.y, Math.min(second.y, third.y)));
+        int maxY = Math.min(drawAreaBottom(), Math.max(first.y, Math.max(second.y, third.y)));
+        if (minX > maxX || minY > maxY) return;
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                long w0 = edgeAtPixelCenter(second, third, x, y);
+                long w1 = edgeAtPixelCenter(third, first, x, y);
+                long w2 = edgeAtPixelCenter(first, second, x, y);
+                if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+                int red = interpolate(first.red, second.red, third.red, w0, w1, w2, doubledArea);
+                int green = interpolate(first.green, second.green, third.green, w0, w1, w2, doubledArea);
+                int blue = interpolate(first.blue, second.blue, third.blue, w0, w1, w2, doubledArea);
+                writeDrawPixel(x, y, red | (green << 8) | (blue << 16));
+            }
+        }
+    }
+
+    private void rasterLine(Vertex first, Vertex second) {
+        int x = first.x;
+        int y = first.y;
+        int dx = Math.abs(second.x - first.x);
+        int sx = first.x < second.x ? 1 : -1;
+        int dy = -Math.abs(second.y - first.y);
+        int sy = first.y < second.y ? 1 : -1;
+        int error = dx + dy;
+        int steps = Math.max(dx, -dy);
+        int index = 0;
+        while (true) {
+            int red = interpolateLineChannel(first.red, second.red, index, steps);
+            int green = interpolateLineChannel(first.green, second.green, index, steps);
+            int blue = interpolateLineChannel(first.blue, second.blue, index, steps);
+            writeDrawPixel(x, y, red | (green << 8) | (blue << 16));
+            if (x == second.x && y == second.y) break;
+            int twiceError = error * 2;
+            if (twiceError >= dy) { error += dy; x += sx; }
+            if (twiceError <= dx) { error += dx; y += sy; }
+            index++;
+        }
+    }
+
+    private Vertex decodeDrawVertex(int coordinate, int color) {
+        int offsetX = signExtend(drawOffset & 0x7FF, 11);
+        int offsetY = signExtend((drawOffset >>> 11) & 0x7FF, 11);
+        int x = signExtend(coordinate & 0x7FF, 11) + offsetX;
+        int y = signExtend((coordinate >>> 16) & 0x7FF, 11) + offsetY;
+        return new Vertex(x, y, color & 0xFF, (color >>> 8) & 0xFF, (color >>> 16) & 0xFF);
+    }
+
+    private void writeDrawPixel(int x, int y, int color) {
+        if (x < drawAreaLeft() || x > drawAreaRight()
+                || y < drawAreaTop() || y > drawAreaBottom()) return;
+        int index = vramIndex(x, y);
+        int oldPixel = vram[index] & 0xFFFF;
+        if ((maskSettings & 2) != 0 && (oldPixel & 0x8000) != 0) return;
+        int packed = rgb24To15(color);
+        if ((maskSettings & 1) != 0) packed |= 0x8000;
+        vram[index] = (short) packed;
+    }
+
+    private int drawAreaLeft() { return drawAreaTopLeft & 0x3FF; }
+    private int drawAreaTop() { return (drawAreaTopLeft >>> 10) & 0x1FF; }
+    private int drawAreaRight() { return drawAreaBottomRight & 0x3FF; }
+    private int drawAreaBottom() { return (drawAreaBottomRight >>> 10) & 0x1FF; }
+
+    private static long triangleArea(Vertex a, Vertex b, Vertex c) {
+        return (long) (b.x - a.x) * (c.y - a.y) - (long) (b.y - a.y) * (c.x - a.x);
+    }
+
+    private static long edgeAtPixelCenter(Vertex a, Vertex b, int x, int y) {
+        long px2 = 2L * x + 1;
+        long py2 = 2L * y + 1;
+        return (long) (b.x - a.x) * (py2 - 2L * a.y)
+                - (long) (b.y - a.y) * (px2 - 2L * a.x);
+    }
+
+    private static int interpolate(int a, int b, int c, long wa, long wb, long wc, long total) {
+        long value = (long) a * wa + (long) b * wb + (long) c * wc;
+        return (int) ((value + total / 2) / total);
+    }
+
+    private static int interpolateLineChannel(int first, int second, int index, int steps) {
+        if (steps == 0) return first;
+        return first + (second - first) * index / steps;
+    }
+
+    private static int signExtend(int value, int bits) {
+        int signBit = 1 << (bits - 1);
+        return (value ^ signBit) - signBit;
+    }
+
+    private static final class Vertex {
+        final int x;
+        final int y;
+        final int red;
+        final int green;
+        final int blue;
+        Vertex(int x, int y, int red, int green, int blue) {
+            this.x = x;
+            this.y = y;
+            this.red = red;
+            this.green = green;
+            this.blue = blue;
         }
     }
 
@@ -449,6 +741,10 @@ public final class Ps1Gpu {
         packetWordsReceived = 0;
         discardPacket = false;
         polylineActive = false;
+        polylineGouraud = false;
+        polylineDrawEnabled = false;
+        polylineHasPrevious = false;
+        polylineExpectColor = false;
         imageUploadActive = false;
         imageX = imageY = imageWidth = imageHeight = 0;
         imagePixelsRemaining = imagePixelIndex = 0;

@@ -2,7 +2,7 @@ package com.raully.psxpsp.ps1;
 
 /**
  * Composição mínima: CPU MIPS, barramento, timers, raster e GPU GP0/GP1 parcial.
- * HLE de BIOS e rasterização de primitivas ainda não existem.
+ * A GPU rasteriza um subconjunto de primitivas e expõe snapshots ARGB; HLE e apresentação Android ainda faltam.
  */
 public final class Ps1Machine {
     private final Ps1MemoryBus bus;
@@ -19,6 +19,7 @@ public final class Ps1Machine {
     public MipsR3000A getCpu() { return cpu; }
     public Ps1VideoTiming getVideoTiming() { return videoTiming; }
     public Ps1Gpu getGpu() { return bus.getGpu(); }
+    public Ps1VideoFrame renderDisplayFrame() { return bus.getGpu().renderDisplayFrame(); }
 
     /** Start execution at an explicitly prepared entry point; no BIOS is synthesized. */
     public void startAt(int entryPoint) {

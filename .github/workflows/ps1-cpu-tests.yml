@@ -29,3 +29,10 @@ jobs:
         run: gradle :engine:ps1:test
       - name: Compile native Android app
         run: gradle :app:assembleDebug
+      - name: Save debug APK for testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: ps1-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

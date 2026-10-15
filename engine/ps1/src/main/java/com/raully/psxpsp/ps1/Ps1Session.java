@@ -15,6 +15,11 @@ public final class Ps1Session implements AutoCloseable {
         void onFrame(Ps1VideoFrame frame);
     }
 
+    public interface AudioListener {
+        /** Called on the emulation worker thread with interleaved signed 16-bit stereo PCM. */
+        void onAudio(short[] interleavedPcm, int sampleRate);
+    }
+
     private static final long NTSC_FRAME_NANOS = 16_666_667L;
     private static final long PAL_FRAME_NANOS = 20_000_000L;
 
@@ -25,23 +30,21 @@ public final class Ps1Session implements AutoCloseable {
     private volatile boolean pauseRequested;
     private Ps1ExecutableLoader.ExecutableInfo executableInfo;
     private FrameListener frameListener;
+    private AudioListener audioListener;
     private Thread worker;
 
     public State getState() { return state; }
     public Ps1ExecutableLoader.ExecutableInfo getExecutableInfo() { return executableInfo; }
     public boolean hasDisc() { return machine.getBus().getCdrom().hasDisc(); }
 
-    /** Set the combined digital controls from touch and physical gamepad input. */
-    public void setControllerButtons(int pressedMask) {
-        machine.getBus().getControllerPort().setPressedButtons(pressedMask);
+    /** Update the live digital-pad buttons from touch controls or an Android gamepad. */
+    public void setControllerButtonMask(int mask) {
+        machine.getBus().getControllerPort().setButtonMask(mask);
     }
 
-    public int getControllerButtons() {
-        return machine.getBus().getControllerPort().getPressedButtons();
+    public int getControllerButtonMask() {
+        return machine.getBus().getControllerPort().getButtonMask();
     }
-
-    /** Snapshot the actual current output of the PS1 GPU. */
-    public Ps1VideoFrame renderCurrentFrame() { return machine.renderDisplayFrame(); }
 
     /** Attach an already opened disc image to the machine's CD-ROM device. */
     public synchronized void insertDisc(Ps1DiscImage image) throws IOException {
@@ -80,9 +83,14 @@ public final class Ps1Session implements AutoCloseable {
 
     /** Start the experimental CPU/raster loop and emit snapshots as frames advance. */
     public synchronized void start(FrameListener listener) {
+        start(listener, null);
+    }
+
+    public synchronized void start(FrameListener listener, AudioListener audioListener) {
         if (state == State.RUNNING) throw new IllegalStateException("session is already running");
         if (state != State.READY) throw new IllegalStateException("load a PS-X EXE before starting");
         frameListener = listener;
+        this.audioListener = audioListener;
         stopRequested = false;
         pauseRequested = false;
         state = State.RUNNING;
@@ -153,6 +161,11 @@ public final class Ps1Session implements AutoCloseable {
                     lastFrame = currentFrame;
                     FrameListener listener = frameListener;
                     if (listener != null) listener.onFrame(machine.renderDisplayFrame());
+                    AudioListener audio = audioListener;
+                    if (audio != null) {
+                        int audioFrames = machine.getGpu().isPal() ? 882 : 735;
+                        audio.onAudio(machine.renderAudioFrames(audioFrames), Ps1Spu.SAMPLE_RATE);
+                    }
                     long framePeriod = machine.getGpu().isPal() ? PAL_FRAME_NANOS : NTSC_FRAME_NANOS;
                     long remaining = framePeriod - (System.nanoTime() - frameStartNanos);
                     if (remaining > 0) LockSupport.parkNanos(remaining);

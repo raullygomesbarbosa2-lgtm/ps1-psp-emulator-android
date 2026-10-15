@@ -30,8 +30,10 @@ public final class Ps1Machine {
         biosHle.reset();
     }
 
-    public void step() {
-        if (!biosHle.dispatch(this)) cpu.step();
+    /** Run one CPU or HLE operation and return its provisional cycle cost. */
+    public int step() {
+        if (!biosHle.dispatch(this)) return cpu.step();
+        return 1; // HLE service latency is still provisional.
     }
 
     /** Advance supplied system cycles through the provisional video clock and timers. */

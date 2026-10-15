@@ -158,8 +158,7 @@ public final class Ps1Session implements AutoCloseable {
                 }
                 if (stopRequested) break;
 
-                machine.step();
-                machine.tickSystemCycles(1);
+                machine.tickSystemCycles(machine.step());
                 long currentFrame = machine.getVideoTiming().getFrameCount();
                 if (currentFrame != lastFrame) {
                     lastFrame = currentFrame;

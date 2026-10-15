@@ -25,6 +25,21 @@ public final class MipsR3000ATest {
     }
 
     @Test
+    public void reportsProvisionalMultiplyAndDivideLatencies() {
+        TestBus bus = new TestBus();
+        bus.put32(START, i(0x09, 0, 1, 6));
+        bus.put32(START + 4, r(1, 1, 0, 0, 0x18)); // MULT
+        bus.put32(START + 8, r(1, 1, 0, 0, 0x1A)); // DIV
+        MipsR3000A cpu = new MipsR3000A(bus);
+        cpu.reset(START);
+        cpu.setRegister(1, 6);
+
+        assertEquals(1, cpu.step());
+        assertEquals(6, cpu.step());
+        assertEquals(36, cpu.step());
+    }
+
+    @Test
     public void branchExecutesOneDelaySlotBeforeTakingTarget() {
         TestBus bus = new TestBus();
         bus.put32(START, i(0x09, 0, 1, 1));      // ADDIU r1,r0,1

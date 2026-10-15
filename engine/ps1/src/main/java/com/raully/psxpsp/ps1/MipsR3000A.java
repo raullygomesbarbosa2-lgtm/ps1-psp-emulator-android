@@ -3,8 +3,8 @@ package com.raully.psxpsp.ps1;
 /**
  * Primeira etapa do interpretador inteiro MIPS R3000A do PS1.
  * Implementa um subconjunto base da ISA, atraso de desvio, atraso de carga,
- * multiplicação/divisão inteiras e exceções básicas. Não implementa ainda
- * cache, comandos GTE completos, temporização do console nem todas as instruções MIPS.
+ * multiplicação/divisão inteiras e exceções básicas. Estima ciclos de MULT/DIV, mas não
+ * modela esperas de memória, comandos GTE completos, cache nem todos os stalls do console.
  */
 public final class MipsR3000A {
     public static final int RESET_VECTOR = 0xBFC00000;
@@ -122,8 +122,8 @@ public final class MipsR3000A {
         return cp0[index];
     }
 
-    /** Execute one instruction, including pending IRQs and any older delayed load. */
-    public void step() {
+    /** Execute one instruction and return its provisional system-cycle cost. */
+    public int step() {
         refreshHardwareInterrupt();
         if (!branchPending && hardwareInterruptEnabled()) {
             if (pendingLoadRegister > 0) gpr[pendingLoadRegister] = pendingLoadValue;
@@ -137,7 +137,7 @@ public final class MipsR3000A {
             branchPending = false;
             enterException(EXC_INTERRUPT, -1);
             gpr[0] = 0;
-            return;
+            return 1;
         }
         final int delayedLoadRegister = pendingLoadRegister;
         final int delayedLoadValue = pendingLoadValue;
@@ -161,10 +161,12 @@ public final class MipsR3000A {
         scheduledLoadValue = 0;
         scheduledPartialLoad = false;
         boolean exceptionTaken = false;
+        int instructionCycles = 1;
 
         try {
             if ((currentInstructionPc & 3) != 0) throw new CpuFault(EXC_ADDRESS_LOAD, currentInstructionPc);
             int instruction = bus.read32(currentInstructionPc);
+            instructionCycles = estimateInstructionCycles(instruction);
             pc += 4;
             execute(instruction);
             // A control transfer in another transfer's delay slot is undefined on R3000A.
@@ -193,6 +195,21 @@ public final class MipsR3000A {
         gpr[0] = 0;
 
         if (!exceptionTaken && wasDelaySlot) pc = oldBranchTarget;
+        return instructionCycles;
+    }
+
+    private static int estimateInstructionCycles(int instruction) {
+        if ((instruction >>> 26) != 0) return 1;
+        switch (instruction & 0x3F) {
+            case 0x18: // MULT
+            case 0x19: // MULTU
+                return 6;
+            case 0x1A: // DIV
+            case 0x1B: // DIVU
+                return 36;
+            default:
+                return 1;
+        }
     }
 
     private void execute(int instruction) throws CpuFault {

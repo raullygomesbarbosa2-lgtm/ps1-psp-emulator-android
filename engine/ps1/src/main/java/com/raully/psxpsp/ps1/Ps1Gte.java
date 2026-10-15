@@ -71,10 +71,15 @@ final class Ps1Gte {
     boolean executeCommand(int instruction) {
         int command = instruction & 0x3F;
         control[31] = 0;
+        boolean shiftFraction = (instruction & (1 << 19)) != 0;
         if (command == 0x06) {
             executeNclip();
         } else if (command == 0x01) {
-            executeRtps((instruction & (1 << 19)) != 0);
+            executeRtps(shiftFraction, 0, true);
+        } else if (command == 0x30) {
+            executeRtps(shiftFraction, 0, false);
+            executeRtps(shiftFraction, 1, false);
+            executeRtps(shiftFraction, 2, true);
         } else {
             return false;
         }
@@ -95,11 +100,11 @@ final class Ps1Gte {
         storeMac0(area);
     }
 
-    private void executeRtps(boolean shiftFraction) {
-        int packedXy = data[0];
+    private void executeRtps(boolean shiftFraction, int vectorIndex, boolean calculateDepthCue) {
+        int packedXy = data[vectorIndex * 2];
         int vx = (short) packedXy;
         int vy = (short) (packedXy >>> 16);
-        int vz = (short) data[1];
+        int vz = (short) data[vectorIndex * 2 + 1];
 
         long rawMac1 = transformRow(0, vx, vy, vz, control[5]);
         long rawMac2 = transformRow(1, vx, vy, vz, control[6]);
@@ -132,8 +137,10 @@ final class Ps1Gte {
         int screenY = saturateScreen(screenYMac >> 16, 13);
         writeData(15, ((screenY & 0xFFFF) << 16) | (screenX & 0xFFFF));
 
-        int depthCueMac = storeMac0((long) (short) control[27] * quotient + control[28]);
-        data[8] = saturateIr0(depthCueMac >> 12);
+        if (calculateDepthCue) {
+            int depthCueMac = storeMac0((long) (short) control[27] * quotient + control[28]);
+            data[8] = saturateIr0(depthCueMac >> 12);
+        }
     }
 
     private long transformRow(int row, int vx, int vy, int vz, int translation) {

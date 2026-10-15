@@ -64,6 +64,40 @@ public class Ps1GteTest {
     }
 
     @Test
+    public void rtptProjectsThreeVerticesAndDepthCueUsesOnlyTheLastVertex() {
+        Ps1Gte gte = new Ps1Gte();
+        gte.writeControl(0, 0x00001000);
+        gte.writeControl(2, 0x00001000);
+        gte.writeControl(4, 0x00001000);
+        gte.writeControl(26, 100);
+        gte.writeControl(27, 500); // V0 would saturate IR0; V2 should not.
+        gte.writeData(0, packSxy(10, 20));
+        gte.writeData(1, 100);
+        gte.writeData(2, packSxy(30, 40));
+        gte.writeData(3, 200);
+        gte.writeData(4, packSxy(50, 60));
+        gte.writeData(5, 400);
+        gte.writeData(8, 123);
+        gte.writeData(16, 9);
+        gte.writeData(17, 8);
+        gte.writeData(18, 7);
+        gte.writeData(19, 6);
+
+        assertTrue(gte.executeCommand(0x00080030)); // RTPT, SF=1.
+
+        assertEquals(packSxy(10, 20), gte.readData(12));
+        assertEquals(packSxy(15, 20), gte.readData(13));
+        assertEquals(packSxy(12, 15), gte.readData(14));
+        assertEquals(6, gte.readData(16));
+        assertEquals(100, gte.readData(17));
+        assertEquals(200, gte.readData(18));
+        assertEquals(400, gte.readData(19));
+        assertEquals(2000, gte.readData(8));
+        assertEquals(8_192_000, gte.readData(24));
+        assertEquals(0, gte.readControl(31)); // no IR0 saturation from the first vertex
+    }
+
+    @Test
     public void screenFifoAndReadOnlyDerivedRegistersFollowAliases() {
         Ps1Gte gte = new Ps1Gte();
         gte.writeData(12, 0x00020001);

@@ -285,12 +285,14 @@ public final class Ps1CdromController {
     private void emitResponse(int interruptCode, int... bytes) {
         response.clear();
         for (int value : bytes) response.addLast(value & 0xFF);
-        interruptFlags = interruptCode & 7;
+        if (interruptCode >= IRQ_INT1 && interruptCode <= IRQ_INT5) {
+            interruptFlags |= 1 << (interruptCode - 1);
+        }
         requestEnabledInterruptIfPending();
     }
 
     private void requestEnabledInterruptIfPending() {
-        if (interruptFlags > 0 && (interruptEnable & (1 << (interruptFlags - 1))) != 0) {
+        if ((interruptFlags & interruptEnable) != 0) {
             interruptController.request(Ps1InterruptController.IRQ_CDROM);
         }
     }

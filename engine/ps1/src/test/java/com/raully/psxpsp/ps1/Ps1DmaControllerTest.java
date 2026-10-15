@@ -103,7 +103,7 @@ public class Ps1DmaControllerTest {
 
     private static void acknowledgeCdromResponse(Ps1MemoryBus bus, int expected) {
         bus.write8(Ps1MemoryBus.CDROM_BASE, 1);
-        assertEquals(expected, bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 7);
+        assertEquals(1 << (expected - 1), bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 0x1F);
         bus.read8(Ps1MemoryBus.CDROM_BASE + 1);
         bus.write8(Ps1MemoryBus.CDROM_BASE + 3, 1 << (expected - 1));
     }

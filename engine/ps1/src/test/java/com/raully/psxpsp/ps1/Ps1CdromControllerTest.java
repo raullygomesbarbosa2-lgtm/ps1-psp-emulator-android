@@ -21,7 +21,7 @@ public class Ps1CdromControllerTest {
         assertTrue(bus.isInterruptPending());
         bus.write8(Ps1MemoryBus.CDROM_BASE, 1);
         assertEquals(1, bus.read8(Ps1MemoryBus.CDROM_BASE) & 3);
-        assertEquals(3, bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 7);
+        assertEquals(1 << 2, bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 0x1F);
         assertEquals(0, bus.read8(Ps1MemoryBus.CDROM_BASE + 1)); // No disc inserted.
         bus.write8(Ps1MemoryBus.CDROM_BASE + 3, 1 << 2); // W1C INT3.
         assertEquals(0, bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 7);
@@ -55,7 +55,7 @@ public class Ps1CdromControllerTest {
         acknowledgeCurrentResponse(bus, 3);
 
         machine.tickSystemCycles(Ps1CdromController.SINGLE_SPEED_SECTOR_CYCLES);
-        assertEquals(1, bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 7);
+        assertEquals(1, bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 0x1F);
         assertTrue(bus.isInterruptPending());
         acknowledgeCurrentResponse(bus, 1);
         assertEquals(0, bus.read8(Ps1MemoryBus.CDROM_BASE) & 0x40); // Data is gated until BFRD.
@@ -86,7 +86,7 @@ public class Ps1CdromControllerTest {
 
     private static void acknowledgeCurrentResponse(Ps1MemoryBus bus, int expectedCode) {
         bus.write8(Ps1MemoryBus.CDROM_BASE, 1);
-        assertEquals(expectedCode, bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 7);
+        assertEquals(1 << (expectedCode - 1), bus.read8(Ps1MemoryBus.CDROM_BASE + 3) & 0x1F);
         bus.read8(Ps1MemoryBus.CDROM_BASE + 1);
         bus.write8(Ps1MemoryBus.CDROM_BASE + 3, 1 << (expectedCode - 1));
     }

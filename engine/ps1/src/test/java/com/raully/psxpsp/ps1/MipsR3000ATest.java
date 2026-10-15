@@ -63,6 +63,54 @@ public final class MipsR3000ATest {
     }
 
     @Test
+    public void lwlAndLwrMergeCorrectLittleEndianByteLanes() {
+        int[] expectedLwl = {0x11BBCCDD, 0x1122CCDD, 0x112233DD, 0x11223344};
+        int[] expectedLwr = {0x44332211, 0xAA443322, 0xAABB4433, 0xAABBCC44};
+        for (int offset = 0; offset < 4; offset++) {
+            assertPartialLoadResult(0x22, offset, 0xAABBCCDD, expectedLwl[offset]); // LWL
+            assertPartialLoadResult(0x26, offset, 0xAABBCCDD, expectedLwr[offset]); // LWR
+        }
+    }
+
+    @Test
+    public void consecutiveLwlLwrToSameRegisterMergeTheOlderPartialLoad() {
+        TestBus bus = new TestBus();
+        bus.put32(0x2000, 0x44332211);
+        bus.write8(0x2004, 0x55);
+        bus.put32(START, i(0x22, 1, 2, 4)); // LWL r2,4(r1)
+        bus.put32(START + 4, i(0x26, 1, 2, 1)); // LWR r2,1(r1)
+        bus.put32(START + 8, 0); // NOP
+        MipsR3000A cpu = new MipsR3000A(bus);
+        cpu.reset(START);
+        cpu.setRegister(1, 0x2000);
+        cpu.setRegister(2, 0xAABBCCDD);
+
+        cpu.step(); cpu.step(); cpu.step();
+
+        assertEquals(0x55443322, cpu.getRegister(2));
+    }
+
+    @Test
+    public void swlAndSwrWriteOnlyTheirLittleEndianByteLanes() {
+        int[][] expectedSwl = {
+                {0xA1, 0x20, 0x30, 0x40},
+                {0xB2, 0xA1, 0x30, 0x40},
+                {0xC3, 0xB2, 0xA1, 0x40},
+                {0xD4, 0xC3, 0xB2, 0xA1}
+        };
+        int[][] expectedSwr = {
+                {0xD4, 0xC3, 0xB2, 0xA1},
+                {0x10, 0xD4, 0xC3, 0xB2},
+                {0x10, 0x20, 0xD4, 0xC3},
+                {0x10, 0x20, 0x30, 0xD4}
+        };
+        for (int offset = 0; offset < 4; offset++) {
+            assertPartialStoreResult(0x2A, offset, expectedSwl[offset]); // SWL
+            assertPartialStoreResult(0x2E, offset, expectedSwr[offset]); // SWR
+        }
+    }
+
+    @Test
     public void newerRegisterWriteWinsOverAnOlderDelayedLoad() {
         TestBus bus = new TestBus();
         bus.put32(0x2000, 0x12345678);
@@ -105,6 +153,39 @@ public final class MipsR3000ATest {
         assertEquals(0x2001, cpu.getCp0Register(8));
         assertEquals(4, (cpu.getCp0Register(13) >>> 2) & 0x1F);
         assertEquals(START, cpu.getCp0Register(14));
+    }
+
+    private static void assertPartialLoadResult(int opcode, int offset, int initialRegister, int expected) {
+        TestBus bus = new TestBus();
+        bus.put32(0x2000, 0x44332211);
+        bus.put32(START, i(opcode, 1, 2, offset));
+        bus.put32(START + 4, 0); // load-delay slot
+        MipsR3000A cpu = new MipsR3000A(bus);
+        cpu.reset(START);
+        cpu.setRegister(1, 0x2000);
+        cpu.setRegister(2, initialRegister);
+
+        cpu.step(); cpu.step();
+
+        assertEquals("opcode 0x" + Integer.toHexString(opcode) + ", offset " + offset,
+                expected, cpu.getRegister(2));
+    }
+
+    private static void assertPartialStoreResult(int opcode, int offset, int[] expectedBytes) {
+        TestBus bus = new TestBus();
+        bus.put32(0x2000, 0x40302010);
+        bus.put32(START, i(opcode, 1, 2, offset));
+        MipsR3000A cpu = new MipsR3000A(bus);
+        cpu.reset(START);
+        cpu.setRegister(1, 0x2000);
+        cpu.setRegister(2, 0xA1B2C3D4);
+
+        cpu.step();
+
+        for (int i = 0; i < expectedBytes.length; i++) {
+            assertEquals("opcode 0x" + Integer.toHexString(opcode) + ", offset " + offset + ", byte " + i,
+                    expectedBytes[i], bus.read8(0x2000 + i));
+        }
     }
 
     private static int i(int opcode, int rs, int rt, int immediate) {

@@ -39,6 +39,11 @@ public final class MipsR3000A {
     private int branchInstructionPc;
     private int pendingLoadRegister = -1;
     private int pendingLoadValue;
+    private boolean pendingPartialLoad;
+    private int currentDelayedLoadRegister = -1;
+    private int currentDelayedLoadValue;
+    private boolean currentDelayedLoadWasPartial;
+    private boolean scheduledPartialLoad;
 
     // Per-step bookkeeping for MIPS load-delay behavior.
     private int currentInstructionPc;
@@ -71,6 +76,11 @@ public final class MipsR3000A {
         branchInstructionPc = 0;
         pendingLoadRegister = -1;
         pendingLoadValue = 0;
+        pendingPartialLoad = false;
+        currentDelayedLoadRegister = -1;
+        currentDelayedLoadValue = 0;
+        currentDelayedLoadWasPartial = false;
+        scheduledPartialLoad = false;
         gpr[0] = 0;
     }
 
@@ -88,6 +98,7 @@ public final class MipsR3000A {
         if (pendingLoadRegister > 0) gpr[pendingLoadRegister] = pendingLoadValue;
         pendingLoadRegister = -1;
         pendingLoadValue = 0;
+        pendingPartialLoad = false;
         pc = gpr[31];
         branchPending = false;
         branchTarget = 0;
@@ -114,6 +125,7 @@ public final class MipsR3000A {
         if (!branchPending && hardwareInterruptEnabled()) {
             if (pendingLoadRegister > 0) gpr[pendingLoadRegister] = pendingLoadValue;
             pendingLoadRegister = -1;
+            pendingPartialLoad = false;
             currentInstructionPc = pc;
             currentInstructionInDelaySlot = false;
             currentBranchPc = 0;
@@ -126,7 +138,12 @@ public final class MipsR3000A {
         }
         final int delayedLoadRegister = pendingLoadRegister;
         final int delayedLoadValue = pendingLoadValue;
+        final boolean delayedLoadWasPartial = pendingPartialLoad;
         pendingLoadRegister = -1;
+        pendingPartialLoad = false;
+        currentDelayedLoadRegister = delayedLoadRegister;
+        currentDelayedLoadValue = delayedLoadValue;
+        currentDelayedLoadWasPartial = delayedLoadWasPartial;
 
         final boolean wasDelaySlot = branchPending;
         final int oldBranchTarget = branchTarget;
@@ -139,6 +156,7 @@ public final class MipsR3000A {
         registerWrittenThisStep = -1;
         scheduledLoadRegister = -1;
         scheduledLoadValue = 0;
+        scheduledPartialLoad = false;
         boolean exceptionTaken = false;
 
         try {
@@ -167,6 +185,7 @@ public final class MipsR3000A {
         if (scheduledLoadRegister > 0) {
             pendingLoadRegister = scheduledLoadRegister;
             pendingLoadValue = scheduledLoadValue;
+            pendingPartialLoad = scheduledPartialLoad;
         }
         gpr[0] = 0;
 
@@ -213,8 +232,16 @@ public final class MipsR3000A {
                 scheduleLoad(rt, (short) bus.read16(address));
                 return;
             }
-            case 0x22: case 0x26: // LWL/LWR are deliberately rejected until lane semantics are tested.
-                throw new CpuFault(EXC_RESERVED_INSTRUCTION, -1);
+            case 0x22: { // LWL
+                int address = effectiveAddress(rs, immediate);
+                schedulePartialLoad(rt, loadWordLeft(address, readMergeRegister(rt)));
+                return;
+            }
+            case 0x26: { // LWR
+                int address = effectiveAddress(rs, immediate);
+                schedulePartialLoad(rt, loadWordRight(address, readMergeRegister(rt)));
+                return;
+            }
             case 0x23: {
                 int address = effectiveAddress(rs, immediate);
                 requireAligned(address, 4, false);
@@ -235,8 +262,8 @@ public final class MipsR3000A {
                 bus.write16(address, readRegister(rt));
                 return;
             }
-            case 0x2A: case 0x2E: // SWL/SWR await verified byte-lane behavior.
-                throw new CpuFault(EXC_RESERVED_INSTRUCTION, -1);
+            case 0x2A: storeWordLeft(effectiveAddress(rs, immediate), readRegister(rt)); return; // SWL
+            case 0x2E: storeWordRight(effectiveAddress(rs, immediate), readRegister(rt)); return; // SWR
             case 0x2B: {
                 int address = effectiveAddress(rs, immediate);
                 requireAligned(address, 4, true);
@@ -319,6 +346,57 @@ public final class MipsR3000A {
         return readRegister(baseRegister) + offset;
     }
 
+    private int readMergeRegister(int register) {
+        if (register != 0 && currentDelayedLoadWasPartial && currentDelayedLoadRegister == register) {
+            return currentDelayedLoadValue;
+        }
+        return readRegister(register);
+    }
+
+    private int loadWordLeft(int address, int oldValue) {
+        int alignedAddress = address & ~3;
+        int offset = address & 3;
+        int result = oldValue;
+        for (int memoryByte = 0; memoryByte <= offset; memoryByte++) {
+            int registerByte = 3 - memoryByte;
+            int shift = registerByte * 8;
+            int mask = 0xFF << shift;
+            result = (result & ~mask) | ((bus.read8(alignedAddress + memoryByte) & 0xFF) << shift);
+        }
+        return result;
+    }
+
+    private int loadWordRight(int address, int oldValue) {
+        int alignedAddress = address & ~3;
+        int offset = address & 3;
+        int result = oldValue;
+        for (int memoryByte = offset; memoryByte < 4; memoryByte++) {
+            int registerByte = memoryByte - offset;
+            int shift = registerByte * 8;
+            int mask = 0xFF << shift;
+            result = (result & ~mask) | ((bus.read8(alignedAddress + memoryByte) & 0xFF) << shift);
+        }
+        return result;
+    }
+
+    private void storeWordLeft(int address, int value) {
+        int alignedAddress = address & ~3;
+        int offset = address & 3;
+        for (int memoryByte = 0; memoryByte <= offset; memoryByte++) {
+            int registerByte = 3 - offset + memoryByte;
+            bus.write8(alignedAddress + memoryByte, value >>> (registerByte * 8));
+        }
+    }
+
+    private void storeWordRight(int address, int value) {
+        int alignedAddress = address & ~3;
+        int offset = address & 3;
+        for (int memoryByte = offset; memoryByte < 4; memoryByte++) {
+            int registerByte = memoryByte - offset;
+            bus.write8(alignedAddress + memoryByte, value >>> (registerByte * 8));
+        }
+    }
+
     private void requireAligned(int address, int alignment, boolean store) throws CpuFault {
         if ((address & (alignment - 1)) != 0) {
             throw new CpuFault(store ? EXC_ADDRESS_STORE : EXC_ADDRESS_LOAD, address);
@@ -347,6 +425,15 @@ public final class MipsR3000A {
         if (register != 0) {
             scheduledLoadRegister = register;
             scheduledLoadValue = value;
+            scheduledPartialLoad = false;
+        }
+    }
+
+    private void schedulePartialLoad(int register, int value) {
+        if (register != 0) {
+            scheduledLoadRegister = register;
+            scheduledLoadValue = value;
+            scheduledPartialLoad = true;
         }
     }
 

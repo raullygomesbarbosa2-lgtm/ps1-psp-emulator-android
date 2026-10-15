@@ -21,7 +21,7 @@ public class Ps1BiosHleMemoryFunctionsTest {
         assertEquals(BASE + 16, invokeA0(machine, 0x2B, BASE + 16, 0x1AB, 8)); // memset
         assertBytes(machine, BASE + 16, new int[]{0xAB, 0xAB, 0xAB, 0xAB, 0xAB, 0xAB, 0xAB, 0xAB});
 
-        assertEquals(0, invokeA0(machine, 0x28, BASE + 16, 8)); // bzero
+        assertEquals(0, invokeA0(machine, 0x28, BASE + 16, 8, 0)); // bzero
         assertBytes(machine, BASE + 16, new int[]{0, 0, 0, 0, 0, 0, 0, 0});
     }
 

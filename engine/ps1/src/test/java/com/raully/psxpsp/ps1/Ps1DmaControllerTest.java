@@ -63,7 +63,7 @@ public class Ps1DmaControllerTest {
         bus.write32(channel2 + 4, 3);
         bus.write32(channel2 + 8, 0x11000001); // RAM -> GPU
 
-        assertEquals(0x001F, bus.getGpu().getVramPixel(0, 0));
+        assertEquals(0x001F, bus.getGpu().readVramPixel(0, 0));
         assertFalse(bus.getDma().isChannelActive(2));
     }
 
@@ -77,13 +77,13 @@ public class Ps1DmaControllerTest {
         bus.write32(channel2, 0x1000);
         bus.write32(channel2 + 4, 3);
         bus.write32(channel2 + 8, 0x01000001); // Enable only: DPCR is still disabled.
-        assertEquals(0, bus.getGpu().getVramPixel(0, 0));
+        assertEquals(0, bus.getGpu().readVramPixel(0, 0));
         assertFalse(bus.getDma().isChannelActive(2));
 
         bus.write32(Ps1DmaController.DPCR_ADDRESS, 0x07654321 | (1 << (2 * 4 + 3)));
-        assertEquals(0, bus.getGpu().getVramPixel(0, 0)); // Manual mode also needs trigger.
+        assertEquals(0, bus.getGpu().readVramPixel(0, 0)); // Manual mode also needs trigger.
         bus.write32(channel2 + 8, 0x11000001); // Enable + trigger, RAM -> GPU.
-        assertEquals(0x001F, bus.getGpu().getVramPixel(0, 0));
+        assertEquals(0x001F, bus.getGpu().readVramPixel(0, 0));
         assertEquals(0, bus.read32(channel2 + 8) & ((1 << 24) | (1 << 28)));
     }
 

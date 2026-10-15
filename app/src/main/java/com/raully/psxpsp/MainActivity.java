@@ -676,10 +676,10 @@ public final class MainActivity extends Activity {
 
     private static int buttonForKey(int keyCode) {
         switch (keyCode) {
-            case KeyEvent.KEYCODE_DPAD_UP: case KeyEvent.KEYCODE_BUTTON_DPAD_UP: return Ps1ControllerPort.UP;
-            case KeyEvent.KEYCODE_DPAD_RIGHT: case KeyEvent.KEYCODE_BUTTON_DPAD_RIGHT: return Ps1ControllerPort.RIGHT;
-            case KeyEvent.KEYCODE_DPAD_DOWN: case KeyEvent.KEYCODE_BUTTON_DPAD_DOWN: return Ps1ControllerPort.DOWN;
-            case KeyEvent.KEYCODE_DPAD_LEFT: case KeyEvent.KEYCODE_BUTTON_DPAD_LEFT: return Ps1ControllerPort.LEFT;
+            case KeyEvent.KEYCODE_DPAD_UP: return Ps1ControllerPort.UP;
+            case KeyEvent.KEYCODE_DPAD_RIGHT: return Ps1ControllerPort.RIGHT;
+            case KeyEvent.KEYCODE_DPAD_DOWN: return Ps1ControllerPort.DOWN;
+            case KeyEvent.KEYCODE_DPAD_LEFT: return Ps1ControllerPort.LEFT;
             case KeyEvent.KEYCODE_BUTTON_A: return Ps1ControllerPort.CROSS;
             case KeyEvent.KEYCODE_BUTTON_B: return Ps1ControllerPort.CIRCLE;
             case KeyEvent.KEYCODE_BUTTON_X: return Ps1ControllerPort.SQUARE;

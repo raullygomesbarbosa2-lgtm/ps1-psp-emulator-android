@@ -262,8 +262,8 @@ public final class Ps1GpuTest {
     public void texturedVariableRectangleReadsUvClutAndSize() {
         Ps1MemoryBus bus = new Ps1MemoryBus();
         Ps1Gpu gpu = bus.getGpu();
-        gpu.writeVramPixel(0, 0, 0x0011); // U=1 and U=2 are both palette index 1
-        gpu.writeVramPixel(0, 1, 0x0011); // same texels on the next texture row
+        gpu.writeVramPixel(0, 0, 0x0110); // U=1 and U=2 are both palette index 1
+        gpu.writeVramPixel(0, 1, 0x0110); // same texels on the next texture row
         gpu.writeVramPixel(17, 0, 0x03E0); // CLUT index 1: green
         bus.write32(Ps1Gpu.DATA_PORT, 0x64808080); // variable-size textured rectangle
         bus.write32(Ps1Gpu.DATA_PORT, xy(120, 20));

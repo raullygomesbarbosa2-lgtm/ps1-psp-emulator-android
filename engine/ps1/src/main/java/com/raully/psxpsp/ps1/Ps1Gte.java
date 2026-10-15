@@ -80,6 +80,8 @@ final class Ps1Gte {
             executeRtps(shiftFraction, 0, false);
             executeRtps(shiftFraction, 1, false);
             executeRtps(shiftFraction, 2, true);
+        } else if (command == 0x12) {
+            if (!executeMvmva(instruction, shiftFraction)) return false;
         } else {
             return false;
         }
@@ -143,29 +145,67 @@ final class Ps1Gte {
         }
     }
 
-    private long transformRow(int row, int vx, int vy, int vz, int translation) {
-        int first;
-        int second;
-        int third;
-        switch (row) {
+    private boolean executeMvmva(int instruction, boolean shiftFraction) {
+        int matrixSelector = (instruction >>> 17) & 3;
+        if (matrixSelector == 3) return false; // Reserved matrix selection is not modeled.
+        int matrixBase = matrixSelector * 8;
+        int vectorSelector = (instruction >>> 15) & 3;
+        int translationSelector = (instruction >>> 13) & 3;
+        boolean limitMode = (instruction & (1 << 10)) != 0;
+        int vx;
+        int vy;
+        int vz;
+        switch (vectorSelector) {
             case 0:
-                first = (short) control[0];
-                second = (short) (control[0] >>> 16);
-                third = (short) control[1];
+                vx = (short) data[0]; vy = (short) (data[0] >>> 16); vz = (short) data[1];
                 break;
             case 1:
-                first = (short) (control[1] >>> 16);
-                second = (short) control[2];
-                third = (short) (control[2] >>> 16);
+                vx = (short) data[2]; vy = (short) (data[2] >>> 16); vz = (short) data[3];
+                break;
+            case 2:
+                vx = (short) data[4]; vy = (short) (data[4] >>> 16); vz = (short) data[5];
                 break;
             default:
-                first = (short) control[3];
-                second = (short) (control[3] >>> 16);
-                third = (short) control[4];
+                vx = (short) data[9]; vy = (short) data[10]; vz = (short) data[11];
                 break;
         }
+        int translationBase = translationSelector == 0 ? 5
+                : translationSelector == 1 ? 13 : translationSelector == 2 ? 21 : -1;
+        int shift = shiftFraction ? 12 : 0;
+        for (int row = 0; row < 3; row++) {
+            int translation = translationBase < 0 ? 0 : control[translationBase + row];
+            int m0 = matrixElement(matrixBase, row, 0);
+            int m1 = matrixElement(matrixBase, row, 1);
+            int m2 = matrixElement(matrixBase, row, 2);
+            long raw;
+            if (translationSelector == 2) {
+                long firstPart = ((long) translation << 12) + (long) m0 * vx;
+                checkMacOverflow(firstPart, 30 - row, 27 - row);
+                saturateIr(firstPart >> shift, row + 1, false);
+                raw = (long) m1 * vy + (long) m2 * vz;
+            } else {
+                raw = ((long) translation << 12)
+                        + (long) m0 * vx + (long) m1 * vy + (long) m2 * vz;
+            }
+            checkMacOverflow(raw, 30 - row, 27 - row);
+            int mac = (int) (raw >> shift);
+            data[25 + row] = mac;
+            data[9 + row] = saturateIr(mac, row + 1, limitMode);
+        }
+        return true;
+    }
+
+    private long transformRow(int row, int vx, int vy, int vz, int translation) {
         return ((long) translation << 12)
-                + (long) first * vx + (long) second * vy + (long) third * vz;
+                + (long) matrixElement(0, row, 0) * vx
+                + (long) matrixElement(0, row, 1) * vy
+                + (long) matrixElement(0, row, 2) * vz;
+    }
+
+    private int matrixElement(int base, int row, int column) {
+        int element = row * 3 + column;
+        int packed = control[base + element / 2];
+        return (element & 1) == 0 ? (short) packed : (short) (packed >>> 16);
     }
 
     private int perspectiveQuotient(int h, int depth) {
@@ -177,15 +217,24 @@ final class Ps1Gte {
     }
 
     private int saturateIr(int value, int register) {
+        return saturateIr(value, register, false);
+    }
+
+    private int saturateIr(int value, int register, boolean limitMode) {
+        return saturateIr((long) value, register, limitMode);
+    }
+
+    private int saturateIr(long value, int register, boolean limitMode) {
+        long minimum = limitMode ? 0 : -0x8000;
         if (value > 0x7FFF) {
             setFlag(1 << (25 - register));
             return 0x7FFF;
         }
-        if (value < -0x8000) {
+        if (value < minimum) {
             setFlag(1 << (25 - register));
-            return -0x8000;
+            return (int) minimum;
         }
-        return value;
+        return (int) value;
     }
 
     private int saturateIr0(int value) {

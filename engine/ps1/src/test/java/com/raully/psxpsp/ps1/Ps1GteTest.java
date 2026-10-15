@@ -1,6 +1,7 @@
 package com.raully.psxpsp.ps1;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -98,6 +99,91 @@ public class Ps1GteTest {
     }
 
     @Test
+    public void mvmvaSelectsRotationVectorAndTranslationAndWritesMacIr() {
+        Ps1Gte gte = new Ps1Gte();
+        setIdentityMatrix(gte, 0);
+        gte.writeControl(5, 1);
+        gte.writeControl(6, -2);
+        gte.writeControl(7, 3);
+        gte.writeData(0, packSxy(2, 3));
+        gte.writeData(1, 4);
+        gte.writeData(12, packSxy(11, 12)); // MVMVA must not touch SXY FIFO.
+
+        assertTrue(gte.executeCommand(mvmvaInstruction(1, 0, 0, 0, false)));
+
+        assertEquals(3, gte.readData(25));
+        assertEquals(1, gte.readData(26));
+        assertEquals(7, gte.readData(27));
+        assertEquals(3, gte.readData(9));
+        assertEquals(1, gte.readData(10));
+        assertEquals(7, gte.readData(11));
+        assertEquals(packSxy(11, 12), gte.readData(12));
+    }
+
+    @Test
+    public void mvmvaCanSelectLightMatrixAndVectorOne() {
+        Ps1Gte gte = new Ps1Gte();
+        gte.writeControl(8, 0x00002000);
+        gte.writeControl(10, 0x00002000);
+        gte.writeControl(12, 0x00002000);
+        gte.writeData(2, packSxy(-2, 3));
+        gte.writeData(3, 4);
+
+        assertTrue(gte.executeCommand(mvmvaInstruction(1, 1, 1, 3, false)));
+
+        assertEquals(-4, gte.readData(9));
+        assertEquals(6, gte.readData(10));
+        assertEquals(8, gte.readData(11));
+    }
+
+    @Test
+    public void mvmvaSelectsColorMatrixVectorTwoAndBackgroundTranslation() {
+        Ps1Gte gte = new Ps1Gte();
+        setIdentityMatrix(gte, 16);
+        gte.writeControl(13, 4);
+        gte.writeControl(14, -5);
+        gte.writeControl(15, 6);
+        gte.writeData(4, packSxy(1, 2));
+        gte.writeData(5, 3);
+
+        assertTrue(gte.executeCommand(mvmvaInstruction(1, 2, 2, 1, false)));
+
+        assertEquals(5, gte.readData(9));
+        assertEquals(-3, gte.readData(10));
+        assertEquals(9, gte.readData(11));
+    }
+
+    @Test
+    public void mvmvaHonorsLimitModeAndRejectsReservedMatrixSelector() {
+        Ps1Gte gte = new Ps1Gte();
+        setIdentityMatrix(gte, 0);
+        gte.writeData(9, -3);
+        gte.writeData(10, 4);
+        gte.writeData(11, 5);
+
+        assertTrue(gte.executeCommand(mvmvaInstruction(1, 0, 3, 3, false)));
+        assertEquals(-3, gte.readData(9));
+        assertTrue(gte.executeCommand(mvmvaInstruction(1, 0, 3, 3, true)));
+        assertEquals(-3, gte.readData(25)); // MAC is not clipped.
+        assertEquals(0, gte.readData(9));
+        assertEquals(0x81000000, gte.readControl(31)); // IR1 saturation and summary.
+        assertFalse(gte.executeCommand(mvmvaInstruction(1, 3, 0, 0, false)));
+    }
+
+    @Test
+    public void mvmvaFarColorSelectorRetainsItsTwoStageHardwareQuirk() {
+        Ps1Gte gte = new Ps1Gte();
+        setIdentityMatrix(gte, 0);
+        gte.writeControl(21, 50000);
+
+        assertTrue(gte.executeCommand(mvmvaInstruction(1, 0, 0, 2, false)));
+
+        assertEquals(0, gte.readData(25)); // Second stage replaces MAC1.
+        assertEquals(0, gte.readData(9));
+        assertEquals(0x81000000, gte.readControl(31)); // First-stage IR saturation remains flagged.
+    }
+
+    @Test
     public void screenFifoAndReadOnlyDerivedRegistersFollowAliases() {
         Ps1Gte gte = new Ps1Gte();
         gte.writeData(12, 0x00020001);
@@ -130,6 +216,17 @@ public class Ps1GteTest {
         assertEquals(27, gte.readData(31));
         gte.writeData(30, -1);
         assertEquals(32, gte.readData(31));
+    }
+
+    private static void setIdentityMatrix(Ps1Gte gte, int base) {
+        gte.writeControl(base, 0x00001000);
+        gte.writeControl(base + 2, 0x00001000);
+        gte.writeControl(base + 4, 0x00001000);
+    }
+
+    private static int mvmvaInstruction(int sf, int matrix, int vector, int translation, boolean lm) {
+        return (sf << 19) | (matrix << 17) | (vector << 15) | (translation << 13)
+                | (lm ? 1 << 10 : 0) | 0x12;
     }
 
     private static int packSxy(int x, int y) {

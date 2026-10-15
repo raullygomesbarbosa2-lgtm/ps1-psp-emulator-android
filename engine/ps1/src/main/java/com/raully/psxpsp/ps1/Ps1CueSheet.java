@@ -198,6 +198,7 @@ public final class Ps1CueSheet {
 
         if (builders.isEmpty()) throw new IllegalArgumentException("CUE contains no tracks");
         Map<Integer, Long> lastIndexBySection = new HashMap<>();
+        Map<Integer, TrackBuilder> lastTrackBySection = new HashMap<>();
         Map<Integer, Integer> sectorSizeBySection = new HashMap<>();
         List<Track> tracks = new ArrayList<>();
         for (int i = 0; i < builders.size(); i++) {
@@ -209,6 +210,11 @@ public final class Ps1CueSheet {
             Long previousIndex = lastIndexBySection.put(builder.fileSection, builder.index01Frame);
             if (previousIndex != null && builder.index01Frame <= previousIndex) {
                 throw new IllegalArgumentException("INDEX 01 positions must increase within each FILE");
+            }
+            TrackBuilder previousTrack = lastTrackBySection.put(builder.fileSection, builder);
+            if (previousTrack != null && builder.index00Frame >= 0
+                    && builder.index00Frame < previousTrack.index01Frame) {
+                throw new IllegalArgumentException("INDEX 00 overlaps the previous track in the same FILE");
             }
             Integer size = sectorSizeBySection.put(builder.fileSection, builder.mode.bytesPerSector);
             if (size != null && size != builder.mode.bytesPerSector) {

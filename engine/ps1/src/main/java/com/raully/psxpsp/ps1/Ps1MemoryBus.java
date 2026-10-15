@@ -4,8 +4,8 @@ import java.util.Arrays;
 
 /**
  * Initial PS1 address bus: mirrored 2 MiB RAM, 1 KiB scratchpad, selected
- * memory-control registers, interrupt controller, video timing, and partial
- * GP0/GP1 GPU ports. Other MMIO, ROM and expansion regions fault explicitly.
+ * memory-control registers, interrupt controller, video timing, initial CD-ROM
+ * registers, and partial GP0/GP1 GPU ports. Other MMIO, ROM and expansion regions fault explicitly.
  */
 public final class Ps1MemoryBus implements Ps1Bus {
     public static final int RAM_SIZE = 2 * 1024 * 1024;
@@ -14,6 +14,7 @@ public final class Ps1MemoryBus implements Ps1Bus {
     public static final int SCRATCHPAD_SIZE = 1024;
     public static final int INTERRUPT_STATUS = 0x1F801070;
     public static final int INTERRUPT_MASK = 0x1F801074;
+    public static final int CDROM_BASE = Ps1CdromController.BASE_ADDRESS;
     public static final int GPU_CONTROL = 0x1F801814;
 
     private final byte[] ram = new byte[RAM_SIZE];
@@ -23,12 +24,14 @@ public final class Ps1MemoryBus implements Ps1Bus {
     private final Ps1Timers timers = new Ps1Timers(interruptController);
     private final Ps1VideoTiming videoTiming = new Ps1VideoTiming(timers);
     private final Ps1Gpu gpu = new Ps1Gpu(videoTiming, interruptController);
+    private final Ps1CdromController cdrom = new Ps1CdromController(interruptController);
 
     public Ps1InterruptController getInterruptController() { return interruptController; }
     public Ps1MemoryControl getMemoryControl() { return memoryControl; }
     public Ps1Timers getTimers() { return timers; }
     public Ps1VideoTiming getVideoTiming() { return videoTiming; }
     public Ps1Gpu getGpu() { return gpu; }
+    public Ps1CdromController getCdrom() { return cdrom; }
 
     @Override
     public boolean isInterruptPending() {
@@ -38,6 +41,9 @@ public final class Ps1MemoryBus implements Ps1Bus {
     @Override
     public int read8(int address) {
         int physicalAddress = toPhysicalAddress(address, false);
+        if (isCdromAddress(physicalAddress)) {
+            return cdrom.readRegister(physicalAddress - CDROM_BASE);
+        }
         if (timers.isMappedAddress(physicalAddress)) {
             int word = timers.readRegister(physicalAddress & ~3);
             return (word >>> ((physicalAddress & 3) * 8)) & 0xFF;
@@ -76,6 +82,10 @@ public final class Ps1MemoryBus implements Ps1Bus {
     @Override
     public void write8(int address, int value) {
         int physicalAddress = toPhysicalAddress(address, true);
+        if (isCdromAddress(physicalAddress)) {
+            cdrom.writeRegister(physicalAddress - CDROM_BASE, value);
+            return;
+        }
         if (timers.isMappedAddress(physicalAddress)) {
             int shift = (physicalAddress & 3) * 8;
             int mask = 0xFF << shift;
@@ -134,13 +144,14 @@ public final class Ps1MemoryBus implements Ps1Bus {
         write16(address + 2, value >>> 16);
     }
 
-    /** Clear RAM/scratchpad and reset implemented control, IRQ, timer, video and GPU blocks. */
+    /** Clear RAM/scratchpad and reset implemented control, IRQ, timer, CD-ROM, video and GPU blocks. */
     public void clear() {
         Arrays.fill(ram, (byte) 0);
         Arrays.fill(scratchpad, (byte) 0);
         interruptController.reset();
         memoryControl.resetToCommonBiosValues();
         timers.reset();
+        cdrom.reset();
         gpu.clear();
     }
 
@@ -156,6 +167,10 @@ public final class Ps1MemoryBus implements Ps1Bus {
 
     public byte[] copyRam() {
         return ram.clone();
+    }
+
+    private boolean isCdromAddress(int physicalAddress) {
+        return physicalAddress >= CDROM_BASE && physicalAddress < CDROM_BASE + 4;
     }
 
     private boolean isGpuDataRegister(int physicalAddress) {

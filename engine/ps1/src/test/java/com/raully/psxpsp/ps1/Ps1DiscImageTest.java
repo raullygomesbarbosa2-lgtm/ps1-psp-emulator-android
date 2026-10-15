@@ -32,8 +32,13 @@ public class Ps1DiscImageTest {
         assertEquals(1, disc.getTrackSectorCount(1));
         assertEquals(1, disc.getTrackSectorCount(2));
         assertEquals(2, disc.getTrackSectorCount(3));
+        assertEquals(4, disc.getTrackStartLba(3));
+        assertEquals(6, disc.getDiscSectorCount());
 
         byte[] raw = new byte[2352];
+        byte[] byLba = new byte[2324];
+        assertEquals(2324, disc.readUserDataSectorAtLba(4, byLba, 0));
+        assertEquals(0x55, byLba[0] & 0xFF);
         disc.readRawSector(3, 0, raw, 0);
         assertEquals(4, raw[0] & 0xFF);
         byte[] payload = new byte[2324];

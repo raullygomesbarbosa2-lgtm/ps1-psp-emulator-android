@@ -33,7 +33,10 @@ public final class Ps1Machine {
     }
 
     /** Advance supplied system cycles through the provisional video clock and timers. */
-    public void tickSystemCycles(long cycles) { videoTiming.advanceSystemCycles(cycles); }
+    public void tickSystemCycles(long cycles) {
+        videoTiming.advanceSystemCycles(cycles);
+        bus.getCdrom().tickSystemCycles(cycles);
+    }
     public void tickVideoClock(long pulses) { videoTiming.advanceVideoTicks(pulses); }
     public void tickDotClocks(long pulses) { bus.getTimers().tickDotClocks(pulses); }
     public void setHBlank(boolean active) { bus.getTimers().setHBlank(active); }

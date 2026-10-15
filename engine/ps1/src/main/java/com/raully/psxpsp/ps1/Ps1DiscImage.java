@@ -22,12 +22,15 @@ public final class Ps1DiscImage implements AutoCloseable {
         final DataSource source;
         final long firstSector;
         final long sectorCount;
+        final long discStartLba;
 
-        TrackLayout(Ps1CueSheet.Track track, DataSource source, long firstSector, long sectorCount) {
+        TrackLayout(Ps1CueSheet.Track track, DataSource source, long firstSector,
+                    long sectorCount, long discStartLba) {
             this.track = track;
             this.source = source;
             this.firstSector = firstSector;
             this.sectorCount = sectorCount;
+            this.discStartLba = discStartLba;
         }
     }
 
@@ -79,7 +82,16 @@ public final class Ps1DiscImage implements AutoCloseable {
                 }
                 long count = endFrame - firstFrame;
                 if (count == 0) throw new IOException("CUE track " + track.getNumber() + " has no stored sectors");
-                layouts.put(track.getNumber(), new TrackLayout(track, source, firstFrame, count));
+                long discStartLba = 0;
+                if (index > 0) {
+                    Ps1CueSheet.Track previousTrack = cueSheet.getTracks().get(index - 1);
+                    TrackLayout previousLayout = layouts.get(previousTrack.getNumber());
+                    long storedPregap = track.getIndex00Frame() >= 0
+                            ? track.getIndex01Frame() - track.getIndex00Frame() : 0;
+                    discStartLba = previousLayout.discStartLba + previousLayout.sectorCount
+                            + storedPregap + track.getPregapFrames();
+                }
+                layouts.put(track.getNumber(), new TrackLayout(track, source, firstFrame, count, discStartLba));
             }
             return new Ps1DiscImage(cueSheet, Collections.unmodifiableMap(sources),
                     Collections.unmodifiableMap(layouts));
@@ -99,6 +111,32 @@ public final class Ps1DiscImage implements AutoCloseable {
 
     public Ps1CueSheet.TrackMode getTrackMode(int trackNumber) {
         return layout(trackNumber).track.getMode();
+    }
+
+    public long getTrackStartLba(int trackNumber) {
+        return layout(trackNumber).discStartLba;
+    }
+
+    public long getDiscSectorCount() {
+        long end = 0;
+        for (TrackLayout layout : tracks.values()) {
+            end = Math.max(end, layout.discStartLba + layout.sectorCount);
+        }
+        return end;
+    }
+
+    /** Reads a data sector by the disc LBA timeline (the standard lead-in is not included). */
+    public int readUserDataSectorAtLba(long lba, byte[] destination, int destinationOffset) throws IOException {
+        if (lba < 0) throw new IndexOutOfBoundsException("negative disc LBA");
+        for (TrackLayout layout : tracks.values()) {
+            long end = layout.discStartLba + layout.sectorCount;
+            if (lba >= layout.discStartLba && lba < end) {
+                if (layout.track.getMode().isAudio()) throw new IllegalStateException("LBA points to an audio track");
+                return readUserDataSector(layout.track.getNumber(), lba - layout.discStartLba,
+                        destination, destinationOffset);
+            }
+        }
+        throw new IndexOutOfBoundsException("LBA is outside a stored data track");
     }
 
     /** Reads one stored sector relative to the track's INDEX 01. */
